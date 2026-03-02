@@ -19,7 +19,7 @@ deployments/
 *.secret
 wallet.json
 
-#  Node.js 基础 --大概率不需要提交
+#  Node.js 基础 --感觉大概率不需要提交
 node_modules/
 npm-debug.log*
 yarn-debug.log*
