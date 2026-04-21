@@ -2,6 +2,35 @@ const fs = require("fs");
 const path = require("path");
 const { ethers } = require("hardhat");
 
+function riskSnapshot({
+  impliedVolBps,
+  downsideSkewBps,
+  upsideSkewBps,
+  shortTermMultiplierBps,
+  mediumTermMultiplierBps,
+  longTermMultiplierBps,
+  downsideInventoryPressureBps,
+  upsideInventoryPressureBps,
+  stressPremiumBps,
+  riskScoreBps,
+  sourceTag
+}) {
+  return {
+    impliedVolBps,
+    downsideSkewBps,
+    upsideSkewBps,
+    shortTermMultiplierBps,
+    mediumTermMultiplierBps,
+    longTermMultiplierBps,
+    downsideInventoryPressureBps,
+    upsideInventoryPressureBps,
+    stressPremiumBps,
+    riskScoreBps,
+    updatedAt: Math.floor(Date.now() / 1000),
+    sourceTag: ethers.encodeBytes32String(sourceTag)
+  };
+}
+
 async function main() {
   const [deployer, lp, buyer] = await ethers.getSigners();
 
@@ -9,13 +38,16 @@ async function main() {
   const mockUsdc = await MockUSDC.deploy(deployer.address);
   await mockUsdc.waitForDeployment();
 
+  const MockRiskParameterProvider = await ethers.getContractFactory("MockRiskParameterProvider");
+  const riskParameterProvider = await MockRiskParameterProvider.deploy(deployer.address);
+  await riskParameterProvider.waitForDeployment();
+
   const MockPriceFeed = await ethers.getContractFactory("MockPriceFeed");
   const spotFeed = await MockPriceFeed.deploy(185n * 10n ** 8n, 8, deployer.address);
-  const volFeed = await MockPriceFeed.deploy(2800, 2, deployer.address);
-  await Promise.all([spotFeed.waitForDeployment(), volFeed.waitForDeployment()]);
+  await spotFeed.waitForDeployment();
 
   const PricingOracle = await ethers.getContractFactory("PricingOracle");
-  const pricingOracle = await PricingOracle.deploy(deployer.address);
+  const pricingOracle = await PricingOracle.deploy(deployer.address, await riskParameterProvider.getAddress());
   await pricingOracle.waitForDeployment();
 
   const InsuranceVault = await ethers.getContractFactory("InsuranceVault");
@@ -31,43 +63,85 @@ async function main() {
   await policyFactory.waitForDeployment();
 
   const marketSeedData = {
-    AAPL: { spot: spotFeed, vol: volFeed, basePremiumBps: 150, downsideRiskBps: 120, upsideRiskBps: 90 },
+    AAPL: {
+      spot: spotFeed,
+      basePremiumBps: 150,
+      riskSnapshot: riskSnapshot({
+        impliedVolBps: 2800,
+        downsideSkewBps: 120,
+        upsideSkewBps: 90,
+        shortTermMultiplierBps: 10250,
+        mediumTermMultiplierBps: 10000,
+        longTermMultiplierBps: 9650,
+        downsideInventoryPressureBps: 80,
+        upsideInventoryPressureBps: 45,
+        stressPremiumBps: 55,
+        riskScoreBps: 6200,
+        sourceTag: "CHAINLINK_FN"
+      })
+    },
     TSLA: {
       spot: await (await ethers.getContractFactory("MockPriceFeed")).deploy(172n * 10n ** 8n, 8, deployer.address),
-      vol: await (await ethers.getContractFactory("MockPriceFeed")).deploy(4200, 2, deployer.address),
       basePremiumBps: 190,
-      downsideRiskBps: 180,
-      upsideRiskBps: 140
+      riskSnapshot: riskSnapshot({
+        impliedVolBps: 4200,
+        downsideSkewBps: 180,
+        upsideSkewBps: 140,
+        shortTermMultiplierBps: 10800,
+        mediumTermMultiplierBps: 10300,
+        longTermMultiplierBps: 9800,
+        downsideInventoryPressureBps: 130,
+        upsideInventoryPressureBps: 90,
+        stressPremiumBps: 85,
+        riskScoreBps: 7600,
+        sourceTag: "CHAINLINK_FN"
+      })
     },
     NVDA: {
       spot: await (await ethers.getContractFactory("MockPriceFeed")).deploy(890n * 10n ** 8n, 8, deployer.address),
-      vol: await (await ethers.getContractFactory("MockPriceFeed")).deploy(3600, 2, deployer.address),
       basePremiumBps: 175,
-      downsideRiskBps: 150,
-      upsideRiskBps: 120
+      riskSnapshot: riskSnapshot({
+        impliedVolBps: 3600,
+        downsideSkewBps: 150,
+        upsideSkewBps: 120,
+        shortTermMultiplierBps: 10550,
+        mediumTermMultiplierBps: 10150,
+        longTermMultiplierBps: 9750,
+        downsideInventoryPressureBps: 110,
+        upsideInventoryPressureBps: 70,
+        stressPremiumBps: 70,
+        riskScoreBps: 7100,
+        sourceTag: "CHAINLINK_FN"
+      })
     },
     MSFT: {
       spot: await (await ethers.getContractFactory("MockPriceFeed")).deploy(415n * 10n ** 8n, 8, deployer.address),
-      vol: await (await ethers.getContractFactory("MockPriceFeed")).deploy(2100, 2, deployer.address),
       basePremiumBps: 135,
-      downsideRiskBps: 100,
-      upsideRiskBps: 85
+      riskSnapshot: riskSnapshot({
+        impliedVolBps: 2100,
+        downsideSkewBps: 100,
+        upsideSkewBps: 85,
+        shortTermMultiplierBps: 10150,
+        mediumTermMultiplierBps: 9950,
+        longTermMultiplierBps: 9700,
+        downsideInventoryPressureBps: 60,
+        upsideInventoryPressureBps: 35,
+        stressPremiumBps: 40,
+        riskScoreBps: 5400,
+        sourceTag: "CHAINLINK_FN"
+      })
     }
   };
 
   for (const symbol of Object.keys(marketSeedData)) {
     await marketSeedData[symbol].spot.waitForDeployment();
-    await marketSeedData[symbol].vol.waitForDeployment();
 
     await pricingOracle.configureMarket(ethers.encodeBytes32String(symbol), {
       spotFeed: await marketSeedData[symbol].spot.getAddress(),
-      volFeed: await marketSeedData[symbol].vol.getAddress(),
       minDuration: 3600,
       maxDuration: 30 * 24 * 3600,
       basePremiumBps: marketSeedData[symbol].basePremiumBps,
       maxNotional: ethers.parseUnits("50000", 6),
-      downsideRiskBps: marketSeedData[symbol].downsideRiskBps,
-      upsideRiskBps: marketSeedData[symbol].upsideRiskBps,
       minTriggerBps: 500,
       maxTriggerBps: 2000,
       openMinutesUtc: 570,
@@ -75,6 +149,8 @@ async function main() {
       enforceMarketHours: false,
       isActive: true
     });
+
+    await riskParameterProvider.setRiskSnapshot(ethers.encodeBytes32String(symbol), marketSeedData[symbol].riskSnapshot);
   }
 
   await insuranceVault.setPolicyManager(await policyFactory.getAddress());
@@ -96,6 +172,7 @@ async function main() {
     symbol: "AAPL",
     contracts: {
       mockUsdc: await mockUsdc.getAddress(),
+      riskParameterProvider: await riskParameterProvider.getAddress(),
       pricingOracle: await pricingOracle.getAddress(),
       insuranceVault: await insuranceVault.getAddress(),
       policyFactory: await policyFactory.getAddress()
@@ -103,19 +180,19 @@ async function main() {
     markets: {
       AAPL: {
         spotFeed: await marketSeedData.AAPL.spot.getAddress(),
-        volFeed: await marketSeedData.AAPL.vol.getAddress()
+        riskSnapshot: marketSeedData.AAPL.riskSnapshot
       },
       TSLA: {
         spotFeed: await marketSeedData.TSLA.spot.getAddress(),
-        volFeed: await marketSeedData.TSLA.vol.getAddress()
+        riskSnapshot: marketSeedData.TSLA.riskSnapshot
       },
       NVDA: {
         spotFeed: await marketSeedData.NVDA.spot.getAddress(),
-        volFeed: await marketSeedData.NVDA.vol.getAddress()
+        riskSnapshot: marketSeedData.NVDA.riskSnapshot
       },
       MSFT: {
         spotFeed: await marketSeedData.MSFT.spot.getAddress(),
-        volFeed: await marketSeedData.MSFT.vol.getAddress()
+        riskSnapshot: marketSeedData.MSFT.riskSnapshot
       }
     },
     accounts: {

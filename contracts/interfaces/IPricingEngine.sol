@@ -11,6 +11,11 @@ interface IPricingEngine {
         uint256 payoutCap;
         uint256 annualVolBps;
         uint256 estimatedProbabilityBps;
+        uint256 termStructureMultiplierBps;
+        uint256 directionalRiskBps;
+        uint256 inventoryPressureBps;
+        uint256 stressPremiumBps;
+        uint256 riskScoreBps;
         uint256 utilizationSurchargeBps;
         uint16 triggerBps;
         bool isDownsideProtection;
@@ -39,4 +44,6 @@ interface IPricingEngine {
     function isMarketOpen(bytes32 symbol) external view returns (bool);
 
     function isSupportedSymbol(bytes32 symbol) external view returns (bool);
+
+    function riskParameterProvider() external view returns (address);
 }

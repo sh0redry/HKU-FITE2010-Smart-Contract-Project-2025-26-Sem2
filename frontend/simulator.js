@@ -2,6 +2,8 @@ import { MARKET_CONFIGS, MARKET_SCENARIOS } from "./scenarios.js";
 
 const BPS = 10000;
 const YEAR_HOURS = 365 * 24;
+const SHORT_TERM_MAX = 7 * 24;
+const MEDIUM_TERM_MAX = 21 * 24;
 const policies = [];
 
 const el = {
@@ -24,10 +26,10 @@ function updateScenarioPreview(symbol) {
   el.scenarioOutput.textContent = JSON.stringify(MARKET_SCENARIOS[symbol], null, 2);
 }
 
-function estimateProbabilityBps(annualVolBps, durationHours, triggerBps, directionalRiskBps) {
+function estimateProbabilityBps(annualVolBps, durationHours, triggerBps, directionalRiskBps, riskScoreBps) {
   const timeScaledVolBps = Math.floor((annualVolBps * durationHours) / YEAR_HOURS);
   const difficulty = triggerBps + 250;
-  const raw = Math.floor(((timeScaledVolBps + directionalRiskBps + 300) * BPS) / difficulty);
+  const raw = Math.floor(((timeScaledVolBps + directionalRiskBps + Math.floor(riskScoreBps / 10) + 300) * BPS) / difficulty);
   return Math.max(300, Math.min(9000, raw));
 }
 
@@ -39,22 +41,38 @@ function utilizationSurchargeBps(utilizationBps = 3500) {
   return 350 + Math.floor((excess * excess) / 900);
 }
 
+function termMultiplierBps(durationHours, market) {
+  if (durationHours <= SHORT_TERM_MAX) return market.shortTermMultiplierBps;
+  if (durationHours <= MEDIUM_TERM_MAX) return market.mediumTermMultiplierBps;
+  return market.longTermMultiplierBps;
+}
+
 function quotePolicy(input) {
   const market = MARKET_CONFIGS[input.symbol];
   const entryPrice = MARKET_SCENARIOS[input.symbol][input.startIndex]?.price ?? market.startPrice;
+  const durationHours = input.durationSteps * 24;
   const strikePrice = input.direction === "down"
     ? entryPrice * (BPS - input.triggerBps) / BPS
     : entryPrice * (BPS + input.triggerBps) / BPS;
+  const directionalRiskBps = input.direction === "down" ? market.downsideSkewBps : market.upsideSkewBps;
+  const inventoryPressureBps =
+    input.direction === "down" ? market.downsideInventoryPressureBps : market.upsideInventoryPressureBps;
+  const termBps = termMultiplierBps(durationHours, market);
   const probabilityBps = estimateProbabilityBps(
     market.annualVolBps,
-    input.durationSteps * 24,
+    durationHours,
     input.triggerBps,
-    input.direction === "down" ? market.downsideRiskBps : market.upsideRiskBps
+    directionalRiskBps,
+    market.riskScoreBps
   );
-  const moveMagnitudeBps = input.triggerBps + Math.floor((market.annualVolBps * input.durationSteps * 24) / YEAR_HOURS);
+  const adjustedAnnualVolBps = Math.floor((market.annualVolBps * termBps) / BPS);
+  const moveMagnitudeBps = input.triggerBps + Math.floor((adjustedAnnualVolBps * durationHours) / YEAR_HOURS);
+  const stressPremiumBps = market.stressPremiumBps + Math.floor(market.riskScoreBps / 20);
   const totalRateBps =
     market.basePremiumBps +
-    (input.direction === "down" ? market.downsideRiskBps : market.upsideRiskBps) +
+    directionalRiskBps +
+    inventoryPressureBps +
+    stressPremiumBps +
     utilizationSurchargeBps() +
     Math.floor(probabilityBps / 12) +
     Math.floor(moveMagnitudeBps / 8) +
@@ -64,7 +82,12 @@ function quotePolicy(input) {
     premium: Math.floor((input.notional * totalRateBps) / BPS),
     entryPrice,
     strikePrice,
-    estimatedProbabilityBps: probabilityBps
+    estimatedProbabilityBps: probabilityBps,
+    termStructureMultiplierBps: termBps,
+    directionalRiskBps,
+    inventoryPressureBps,
+    stressPremiumBps,
+    riskScoreBps: market.riskScoreBps
   };
 }
 
@@ -109,6 +132,12 @@ function runScenario() {
       exitPrice: exitPoint.price,
       strikePrice: quote.strikePrice,
       premium: quote.premium,
+      estimatedProbabilityBps: quote.estimatedProbabilityBps,
+      termStructureMultiplierBps: quote.termStructureMultiplierBps,
+      directionalRiskBps: quote.directionalRiskBps,
+      inventoryPressureBps: quote.inventoryPressureBps,
+      stressPremiumBps: quote.stressPremiumBps,
+      riskScoreBps: quote.riskScoreBps,
       triggered: payout > 0,
       payout,
       protocolRevenue: quote.premium - payout

@@ -2,12 +2,41 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { loadFixture, time } = require("@nomicfoundation/hardhat-toolbox/network-helpers");
 
-describe("Phase 3 Product Lifecycle", function () {
+describe("Phase 4 Pricing Lifecycle", function () {
   const AAPL = ethers.encodeBytes32String("AAPL");
   const MSFT = ethers.encodeBytes32String("MSFT");
   const NVDA = ethers.encodeBytes32String("NVDA");
   const TSLA = ethers.encodeBytes32String("TSLA");
   const USDC_DECIMALS = 6;
+
+  function riskSnapshot({
+    impliedVolBps,
+    downsideSkewBps,
+    upsideSkewBps,
+    shortTermMultiplierBps,
+    mediumTermMultiplierBps,
+    longTermMultiplierBps,
+    downsideInventoryPressureBps,
+    upsideInventoryPressureBps,
+    stressPremiumBps,
+    riskScoreBps,
+    sourceTag
+  }) {
+    return {
+      impliedVolBps,
+      downsideSkewBps,
+      upsideSkewBps,
+      shortTermMultiplierBps,
+      mediumTermMultiplierBps,
+      longTermMultiplierBps,
+      downsideInventoryPressureBps,
+      upsideInventoryPressureBps,
+      stressPremiumBps,
+      riskScoreBps,
+      updatedAt: Math.floor(Date.now() / 1000),
+      sourceTag: ethers.encodeBytes32String(sourceTag)
+    };
+  }
 
   async function deployFixture() {
     const [owner, lp, buyer] = await ethers.getSigners();
@@ -16,13 +45,16 @@ describe("Phase 3 Product Lifecycle", function () {
     const mockUsdc = await MockUSDC.deploy(owner.address);
     await mockUsdc.waitForDeployment();
 
+    const MockRiskParameterProvider = await ethers.getContractFactory("MockRiskParameterProvider");
+    const riskParameterProvider = await MockRiskParameterProvider.deploy(owner.address);
+    await riskParameterProvider.waitForDeployment();
+
     const MockPriceFeed = await ethers.getContractFactory("MockPriceFeed");
     const spotFeed = await MockPriceFeed.deploy(185n * 10n ** 8n, 8, owner.address);
-    const volFeed = await MockPriceFeed.deploy(2800, 2, owner.address);
-    await Promise.all([spotFeed.waitForDeployment(), volFeed.waitForDeployment()]);
+    await spotFeed.waitForDeployment();
 
     const PricingOracle = await ethers.getContractFactory("PricingOracle");
-    const pricingOracle = await PricingOracle.deploy(owner.address);
+    const pricingOracle = await PricingOracle.deploy(owner.address, await riskParameterProvider.getAddress());
     await pricingOracle.waitForDeployment();
 
     const InsuranceVault = await ethers.getContractFactory("InsuranceVault");
@@ -39,13 +71,10 @@ describe("Phase 3 Product Lifecycle", function () {
 
     const baseConfig = {
       spotFeed: await spotFeed.getAddress(),
-      volFeed: await volFeed.getAddress(),
       minDuration: 3600,
       maxDuration: 30 * 24 * 3600,
       basePremiumBps: 150,
       maxNotional: ethers.parseUnits("50000", USDC_DECIMALS),
-      downsideRiskBps: 120,
-      upsideRiskBps: 90,
       minTriggerBps: 500,
       maxTriggerBps: 2000,
       openMinutesUtc: 570,
@@ -57,22 +86,81 @@ describe("Phase 3 Product Lifecycle", function () {
     await pricingOracle.configureMarket(AAPL, baseConfig);
     await pricingOracle.configureMarket(TSLA, {
       ...baseConfig,
-      basePremiumBps: 190,
-      downsideRiskBps: 180,
-      upsideRiskBps: 140
+      basePremiumBps: 190
     });
     await pricingOracle.configureMarket(NVDA, {
       ...baseConfig,
-      basePremiumBps: 175,
-      downsideRiskBps: 150,
-      upsideRiskBps: 120
+      basePremiumBps: 175
     });
     await pricingOracle.configureMarket(MSFT, {
       ...baseConfig,
-      basePremiumBps: 135,
-      downsideRiskBps: 100,
-      upsideRiskBps: 85
+      basePremiumBps: 135
     });
+
+    await riskParameterProvider.setRiskSnapshot(
+      AAPL,
+      riskSnapshot({
+        impliedVolBps: 2800,
+        downsideSkewBps: 120,
+        upsideSkewBps: 90,
+        shortTermMultiplierBps: 10250,
+        mediumTermMultiplierBps: 10000,
+        longTermMultiplierBps: 9650,
+        downsideInventoryPressureBps: 80,
+        upsideInventoryPressureBps: 45,
+        stressPremiumBps: 55,
+        riskScoreBps: 6200,
+        sourceTag: "TEST_AAPL"
+      })
+    );
+    await riskParameterProvider.setRiskSnapshot(
+      TSLA,
+      riskSnapshot({
+        impliedVolBps: 4200,
+        downsideSkewBps: 180,
+        upsideSkewBps: 140,
+        shortTermMultiplierBps: 10800,
+        mediumTermMultiplierBps: 10300,
+        longTermMultiplierBps: 9800,
+        downsideInventoryPressureBps: 130,
+        upsideInventoryPressureBps: 90,
+        stressPremiumBps: 85,
+        riskScoreBps: 7600,
+        sourceTag: "TEST_TSLA"
+      })
+    );
+    await riskParameterProvider.setRiskSnapshot(
+      NVDA,
+      riskSnapshot({
+        impliedVolBps: 3600,
+        downsideSkewBps: 150,
+        upsideSkewBps: 120,
+        shortTermMultiplierBps: 10550,
+        mediumTermMultiplierBps: 10150,
+        longTermMultiplierBps: 9750,
+        downsideInventoryPressureBps: 110,
+        upsideInventoryPressureBps: 70,
+        stressPremiumBps: 70,
+        riskScoreBps: 7100,
+        sourceTag: "TEST_NVDA"
+      })
+    );
+    await riskParameterProvider.setRiskSnapshot(
+      MSFT,
+      riskSnapshot({
+        impliedVolBps: 2100,
+        downsideSkewBps: 100,
+        upsideSkewBps: 85,
+        shortTermMultiplierBps: 10150,
+        mediumTermMultiplierBps: 9950,
+        longTermMultiplierBps: 9700,
+        downsideInventoryPressureBps: 60,
+        upsideInventoryPressureBps: 35,
+        stressPremiumBps: 40,
+        riskScoreBps: 5400,
+        sourceTag: "TEST_MSFT"
+      })
+    );
     await insuranceVault.setPolicyManager(await policyFactory.getAddress());
     await mockUsdc.mint(lp.address, ethers.parseUnits("250000", USDC_DECIMALS));
     await mockUsdc.mint(buyer.address, ethers.parseUnits("50000", USDC_DECIMALS));
@@ -83,7 +171,7 @@ describe("Phase 3 Product Lifecycle", function () {
       buyer,
       mockUsdc,
       spotFeed,
-      volFeed,
+      riskParameterProvider,
       pricingOracle,
       insuranceVault,
       policyFactory,
@@ -112,6 +200,9 @@ describe("Phase 3 Product Lifecycle", function () {
     expect(quote.strikePrice).to.equal((ethers.parseEther("185") * 9000n) / 10000n);
     expect(quote.triggerBps).to.equal(1000);
     expect(quote.notional).to.equal(notional);
+    expect(quote.annualVolBps).to.equal(2800);
+    expect(quote.directionalRiskBps).to.equal(120);
+    expect(quote.termStructureMultiplierBps).to.equal(10250);
     expect(await pricingOracle.isSupportedSymbol(AAPL)).to.equal(true);
 
     await mockUsdc.connect(buyer).approve(await insuranceVault.getAddress(), quote.premium);
@@ -157,7 +248,7 @@ describe("Phase 3 Product Lifecycle", function () {
     await purchaseTx.wait();
 
     const purchasedPolicy = await policyFactory.getPolicy(1);
-    await spotFeed.setAnswer(160n * 10n ** 8n);
+    await spotFeed.setAnswer(120n * 10n ** 8n);
     await time.increaseTo(Number(purchasedPolicy.expiry) + 1);
 
     const buyerBalanceBefore = await mockUsdc.balanceOf(buyer.address);
@@ -166,10 +257,12 @@ describe("Phase 3 Product Lifecycle", function () {
 
     const settledPolicy = await policyFactory.getPolicy(1);
     const rawPayout =
-      (purchasedPolicy.notional * (purchasedPolicy.strikePrice - ethers.parseEther("160"))) / purchasedPolicy.entryPrice;
-    const expectedPayout = rawPayout - purchasedPolicy.deductible;
+      (purchasedPolicy.notional * (purchasedPolicy.strikePrice - ethers.parseEther("120"))) / purchasedPolicy.entryPrice;
+    const expectedPayout = rawPayout > purchasedPolicy.deductible
+      ? rawPayout - purchasedPolicy.deductible
+      : 0n;
 
-    expect(settledPolicy.exitPrice).to.equal(ethers.parseEther("160"));
+    expect(settledPolicy.exitPrice).to.equal(ethers.parseEther("120"));
     expect(settledPolicy.payoutAmount).to.equal(expectedPayout);
     expect(settledPolicy.status).to.equal(1);
     expect(settledPolicy.settledAt).to.be.gt(settledPolicy.createdAt);
@@ -241,12 +334,75 @@ describe("Phase 3 Product Lifecycle", function () {
     expect(await pricingOracle.isSupportedSymbol(MSFT)).to.equal(true);
   });
 
+  it("uses risk snapshots to differentiate premiums across symbols", async function () {
+    const { lp, mockUsdc, insuranceVault, policyFactory } = await loadFixture(deployFixture);
+
+    await approveAndDeposit(mockUsdc, insuranceVault, lp, ethers.parseUnits("20000", USDC_DECIMALS));
+
+    const aaplQuote = await policyFactory.previewPolicy(
+      AAPL,
+      true,
+      ethers.parseUnits("1000", USDC_DECIMALS),
+      24 * 3600,
+      1000,
+      0,
+      ethers.parseUnits("500", USDC_DECIMALS)
+    );
+    const tslaQuote = await policyFactory.previewPolicy(
+      TSLA,
+      true,
+      ethers.parseUnits("1000", USDC_DECIMALS),
+      24 * 3600,
+      1000,
+      0,
+      ethers.parseUnits("500", USDC_DECIMALS)
+    );
+
+    expect(tslaQuote.premium).to.be.gt(aaplQuote.premium);
+    expect(tslaQuote.annualVolBps).to.equal(4200);
+    expect(tslaQuote.riskScoreBps).to.equal(7600);
+  });
+
   it("blocks triggers outside the 5 to 20 percent range", async function () {
     const { policyFactory, pricingOracle } = await loadFixture(deployFixture);
 
     await expect(
       policyFactory.previewPolicy(AAPL, true, ethers.parseUnits("1000", USDC_DECIMALS), 24 * 3600, 300, 0, ethers.parseUnits("500", USDC_DECIMALS))
     ).to.be.revertedWithCustomError(pricingOracle, "InvalidTrigger");
+  });
+
+  it("rejects quotes when the risk snapshot is missing", async function () {
+    const { owner, pricingOracle } = await loadFixture(deployFixture);
+    const MockPriceFeed = await ethers.getContractFactory("MockPriceFeed");
+    const amznSpotFeed = await MockPriceFeed.deploy(178n * 10n ** 8n, 8, owner.address);
+    await amznSpotFeed.waitForDeployment();
+
+    await pricingOracle.configureMarket(ethers.encodeBytes32String("AMZN"), {
+      spotFeed: await amznSpotFeed.getAddress(),
+      minDuration: 3600,
+      maxDuration: 30 * 24 * 3600,
+      basePremiumBps: 155,
+      maxNotional: ethers.parseUnits("50000", USDC_DECIMALS),
+      minTriggerBps: 500,
+      maxTriggerBps: 2000,
+      openMinutesUtc: 570,
+      closeMinutesUtc: 960,
+      enforceMarketHours: false,
+      isActive: true
+    });
+
+    await expect(
+      pricingOracle.quotePremium(
+        ethers.encodeBytes32String("AMZN"),
+        ethers.parseUnits("1000", USDC_DECIMALS),
+        24 * 3600,
+        1000,
+        0,
+        ethers.parseUnits("500", USDC_DECIMALS),
+        0,
+        true
+      )
+    ).to.be.revertedWithCustomError(pricingOracle, "MissingRiskSnapshot");
   });
 
   it("cancels a policy after the lock delay without refunding premium", async function () {

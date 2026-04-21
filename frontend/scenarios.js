@@ -1,8 +1,60 @@
 export const MARKET_CONFIGS = {
-  AAPL: { basePremiumBps: 150, annualVolBps: 2800, downsideRiskBps: 120, upsideRiskBps: 90, startPrice: 185 },
-  TSLA: { basePremiumBps: 190, annualVolBps: 4200, downsideRiskBps: 180, upsideRiskBps: 140, startPrice: 172 },
-  NVDA: { basePremiumBps: 175, annualVolBps: 3600, downsideRiskBps: 150, upsideRiskBps: 120, startPrice: 890 },
-  MSFT: { basePremiumBps: 135, annualVolBps: 2100, downsideRiskBps: 100, upsideRiskBps: 85, startPrice: 415 }
+  AAPL: {
+    basePremiumBps: 150,
+    annualVolBps: 2800,
+    downsideSkewBps: 120,
+    upsideSkewBps: 90,
+    shortTermMultiplierBps: 10250,
+    mediumTermMultiplierBps: 10000,
+    longTermMultiplierBps: 9650,
+    downsideInventoryPressureBps: 80,
+    upsideInventoryPressureBps: 45,
+    stressPremiumBps: 55,
+    riskScoreBps: 6200,
+    startPrice: 185
+  },
+  TSLA: {
+    basePremiumBps: 190,
+    annualVolBps: 4200,
+    downsideSkewBps: 180,
+    upsideSkewBps: 140,
+    shortTermMultiplierBps: 10800,
+    mediumTermMultiplierBps: 10300,
+    longTermMultiplierBps: 9800,
+    downsideInventoryPressureBps: 130,
+    upsideInventoryPressureBps: 90,
+    stressPremiumBps: 85,
+    riskScoreBps: 7600,
+    startPrice: 172
+  },
+  NVDA: {
+    basePremiumBps: 175,
+    annualVolBps: 3600,
+    downsideSkewBps: 150,
+    upsideSkewBps: 120,
+    shortTermMultiplierBps: 10550,
+    mediumTermMultiplierBps: 10150,
+    longTermMultiplierBps: 9750,
+    downsideInventoryPressureBps: 110,
+    upsideInventoryPressureBps: 70,
+    stressPremiumBps: 70,
+    riskScoreBps: 7100,
+    startPrice: 890
+  },
+  MSFT: {
+    basePremiumBps: 135,
+    annualVolBps: 2100,
+    downsideSkewBps: 100,
+    upsideSkewBps: 85,
+    shortTermMultiplierBps: 10150,
+    mediumTermMultiplierBps: 9950,
+    longTermMultiplierBps: 9700,
+    downsideInventoryPressureBps: 60,
+    upsideInventoryPressureBps: 35,
+    stressPremiumBps: 40,
+    riskScoreBps: 5400,
+    startPrice: 415
+  }
 };
 
 export const MARKET_SCENARIOS = {

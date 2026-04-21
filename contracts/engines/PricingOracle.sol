@@ -3,23 +3,24 @@ pragma solidity ^0.8.20;
 
 import "../interfaces/IPriceFeed.sol";
 import "../interfaces/IPricingEngine.sol";
+import "../interfaces/IRiskParameterProvider.sol";
 
 contract PricingOracle is IPricingEngine {
     uint256 public constant BPS = 10_000;
     uint256 public constant YEAR = 365 days;
     uint256 private constant DAY = 1 days;
+    uint256 private constant SHORT_TERM_MAX = 7 days;
+    uint256 private constant MEDIUM_TERM_MAX = 21 days;
 
     address public owner;
+    address public override riskParameterProvider;
 
     struct MarketConfig {
         address spotFeed;
-        address volFeed;
         uint256 minDuration;
         uint256 maxDuration;
         uint256 basePremiumBps;
         uint256 maxNotional;
-        uint256 downsideRiskBps;
-        uint256 upsideRiskBps;
         uint16 minTriggerBps;
         uint16 maxTriggerBps;
         uint16 openMinutesUtc;
@@ -30,13 +31,10 @@ contract PricingOracle is IPricingEngine {
 
     struct MarketConfigInput {
         address spotFeed;
-        address volFeed;
         uint256 minDuration;
         uint256 maxDuration;
         uint256 basePremiumBps;
         uint256 maxNotional;
-        uint256 downsideRiskBps;
-        uint256 upsideRiskBps;
         uint16 minTriggerBps;
         uint16 maxTriggerBps;
         uint16 openMinutesUtc;
@@ -51,10 +49,10 @@ contract PricingOracle is IPricingEngine {
     event MarketConfigured(
         bytes32 indexed symbol,
         address indexed spotFeed,
-        address indexed volFeed,
         uint256 basePremiumBps,
         uint256 maxNotional
     );
+    event RiskParameterProviderUpdated(address indexed previousProvider, address indexed newProvider);
 
     error NotOwner();
     error InvalidAddress();
@@ -66,16 +64,20 @@ contract PricingOracle is IPricingEngine {
     error InvalidPayoutTerms();
     error MarketClosed(bytes32 symbol);
     error InvalidOracleAnswer();
+    error InvalidRiskProvider();
+    error MissingRiskSnapshot(bytes32 symbol);
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
         _;
     }
 
-    constructor(address initialOwner) {
-        if (initialOwner == address(0)) revert InvalidAddress();
+    constructor(address initialOwner, address riskParameterProviderAddress) {
+        if (initialOwner == address(0) || riskParameterProviderAddress == address(0)) revert InvalidAddress();
         owner = initialOwner;
+        riskParameterProvider = riskParameterProviderAddress;
         emit OwnershipTransferred(address(0), initialOwner);
+        emit RiskParameterProviderUpdated(address(0), riskParameterProviderAddress);
     }
 
     function transferOwnership(address newOwner) external onlyOwner {
@@ -84,8 +86,14 @@ contract PricingOracle is IPricingEngine {
         owner = newOwner;
     }
 
+    function setRiskParameterProvider(address newProvider) external onlyOwner {
+        if (newProvider == address(0)) revert InvalidRiskProvider();
+        emit RiskParameterProviderUpdated(riskParameterProvider, newProvider);
+        riskParameterProvider = newProvider;
+    }
+
     function configureMarket(bytes32 symbol, MarketConfigInput calldata config) external onlyOwner {
-        if (config.spotFeed == address(0) || config.volFeed == address(0)) revert InvalidAddress();
+        if (config.spotFeed == address(0)) revert InvalidAddress();
         if (config.minDuration == 0 || config.maxDuration < config.minDuration) revert InvalidDuration();
         if (config.openMinutesUtc >= DAY / 1 minutes || config.closeMinutesUtc >= DAY / 1 minutes) {
             revert InvalidDuration();
@@ -96,13 +104,10 @@ contract PricingOracle is IPricingEngine {
 
         MarketConfig storage market = marketConfigs[symbol];
         market.spotFeed = config.spotFeed;
-        market.volFeed = config.volFeed;
         market.minDuration = config.minDuration;
         market.maxDuration = config.maxDuration;
         market.basePremiumBps = config.basePremiumBps;
         market.maxNotional = config.maxNotional;
-        market.downsideRiskBps = config.downsideRiskBps;
-        market.upsideRiskBps = config.upsideRiskBps;
         market.minTriggerBps = config.minTriggerBps;
         market.maxTriggerBps = config.maxTriggerBps;
         market.openMinutesUtc = config.openMinutesUtc;
@@ -113,7 +118,6 @@ contract PricingOracle is IPricingEngine {
         emit MarketConfigured(
             symbol,
             config.spotFeed,
-            config.volFeed,
             config.basePremiumBps,
             config.maxNotional
         );
@@ -139,17 +143,28 @@ contract PricingOracle is IPricingEngine {
         if (!_isMarketOpen(config)) revert MarketClosed(symbol);
 
         uint256 spotPrice = _readNormalizedFeed(config.spotFeed);
-        uint256 annualVolBps = _readNormalizedFeed(config.volFeed);
-        uint256 riskBps = isDownsideProtection ? config.downsideRiskBps : config.upsideRiskBps;
+        IRiskParameterProvider.RiskSnapshot memory snapshot = IRiskParameterProvider(riskParameterProvider)
+            .getRiskSnapshot(symbol);
+        if (snapshot.impliedVolBps == 0 || snapshot.updatedAt == 0) revert MissingRiskSnapshot(symbol);
+
+        uint256 annualVolBps = snapshot.impliedVolBps;
+        uint256 directionalRiskBps = isDownsideProtection ? snapshot.downsideSkewBps : snapshot.upsideSkewBps;
+        uint256 inventoryPressureBps =
+            isDownsideProtection ? snapshot.downsideInventoryPressureBps : snapshot.upsideInventoryPressureBps;
+        uint256 termStructureMultiplierBps = _termMultiplier(duration, snapshot);
         uint256 surchargeBps = _utilizationSurcharge(utilizationBpsValue);
         uint256 strikePrice = isDownsideProtection
             ? (spotPrice * (BPS - triggerBps)) / BPS
             : (spotPrice * (BPS + triggerBps)) / BPS;
-        uint256 estimatedProbabilityBps = _estimateProbabilityBps(annualVolBps, duration, triggerBps, riskBps);
-        uint256 moveMagnitudeBps = triggerBps + (annualVolBps * duration) / YEAR;
+        uint256 estimatedProbabilityBps =
+            _estimateProbabilityBps(annualVolBps, duration, triggerBps, directionalRiskBps, snapshot.riskScoreBps);
+        uint256 moveMagnitudeBps = triggerBps + (((annualVolBps * termStructureMultiplierBps) / BPS) * duration) / YEAR;
+        uint256 stressPremiumBps = snapshot.stressPremiumBps + (snapshot.riskScoreBps / 20);
         uint256 totalRateBps =
             config.basePremiumBps +
-            riskBps +
+            directionalRiskBps +
+            inventoryPressureBps +
+            stressPremiumBps +
             surchargeBps +
             (estimatedProbabilityBps / 12) +
             (moveMagnitudeBps / 8) +
@@ -165,6 +180,11 @@ contract PricingOracle is IPricingEngine {
             payoutCap: payoutCap,
             annualVolBps: annualVolBps,
             estimatedProbabilityBps: estimatedProbabilityBps,
+            termStructureMultiplierBps: termStructureMultiplierBps,
+            directionalRiskBps: directionalRiskBps,
+            inventoryPressureBps: inventoryPressureBps,
+            stressPremiumBps: stressPremiumBps,
+            riskScoreBps: snapshot.riskScoreBps,
             utilizationSurchargeBps: surchargeBps,
             triggerBps: triggerBps,
             isDownsideProtection: isDownsideProtection,
@@ -203,11 +223,12 @@ contract PricingOracle is IPricingEngine {
         uint256 annualVolBps,
         uint256 duration,
         uint16 triggerBps,
-        uint256 directionalRiskBps
+        uint256 directionalRiskBps,
+        uint256 riskScoreBps
     ) internal pure returns (uint256 probabilityBps) {
         uint256 timeScaledVolBps = (annualVolBps * duration) / YEAR;
         uint256 difficulty = uint256(triggerBps) + 250;
-        uint256 raw = ((timeScaledVolBps + directionalRiskBps + 300) * BPS) / difficulty;
+        uint256 raw = ((timeScaledVolBps + directionalRiskBps + (riskScoreBps / 10) + 300) * BPS) / difficulty;
 
         if (raw < 300) {
             return 300;
@@ -216,6 +237,20 @@ contract PricingOracle is IPricingEngine {
             return 9_000;
         }
         probabilityBps = raw;
+    }
+
+    function _termMultiplier(uint256 duration, IRiskParameterProvider.RiskSnapshot memory snapshot)
+        internal
+        pure
+        returns (uint256 multiplierBps)
+    {
+        if (duration <= SHORT_TERM_MAX) {
+            return snapshot.shortTermMultiplierBps;
+        }
+        if (duration <= MEDIUM_TERM_MAX) {
+            return snapshot.mediumTermMultiplierBps;
+        }
+        multiplierBps = snapshot.longTermMultiplierBps;
     }
 
     function _readNormalizedFeed(address feed) internal view returns (uint256 value) {

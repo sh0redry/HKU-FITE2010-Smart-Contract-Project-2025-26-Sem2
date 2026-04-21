@@ -10,7 +10,7 @@ const state = {
 };
 
 const policyFactoryAbi = [
-  "function previewPolicy(bytes32 symbol, bool isDownsideProtection, uint256 notional, uint256 duration, uint16 triggerBps, uint256 deductible, uint256 payoutCap) view returns ((uint256 premium, uint256 spotPrice, uint256 strikePrice, uint256 notional, uint256 deductible, uint256 payoutCap, uint256 annualVolBps, uint256 estimatedProbabilityBps, uint256 utilizationSurchargeBps, uint16 triggerBps, bool isDownsideProtection, uint256 expiry))",
+  "function previewPolicy(bytes32 symbol, bool isDownsideProtection, uint256 notional, uint256 duration, uint16 triggerBps, uint256 deductible, uint256 payoutCap) view returns ((uint256 premium, uint256 spotPrice, uint256 strikePrice, uint256 notional, uint256 deductible, uint256 payoutCap, uint256 annualVolBps, uint256 estimatedProbabilityBps, uint256 termStructureMultiplierBps, uint256 directionalRiskBps, uint256 inventoryPressureBps, uint256 stressPremiumBps, uint256 riskScoreBps, uint256 utilizationSurchargeBps, uint16 triggerBps, bool isDownsideProtection, uint256 expiry))",
   "function purchasePolicy(bytes32 symbol, bool isDownsideProtection, uint256 notional, uint256 duration, uint16 triggerBps, uint256 deductible, uint256 payoutCap) returns (uint256)",
   "function settlePolicy(uint256 policyId)",
   "function cancelPolicy(uint256 policyId)",
@@ -186,6 +186,11 @@ async function getQuote() {
     `strikePrice: ${ethers.formatUnits(quote.strikePrice, 18)} USD\n` +
     `estimatedProbabilityBps: ${quote.estimatedProbabilityBps}\n` +
     `annualVolBps: ${quote.annualVolBps}\n` +
+    `termStructureMultiplierBps: ${quote.termStructureMultiplierBps}\n` +
+    `directionalRiskBps: ${quote.directionalRiskBps}\n` +
+    `inventoryPressureBps: ${quote.inventoryPressureBps}\n` +
+    `stressPremiumBps: ${quote.stressPremiumBps}\n` +
+    `riskScoreBps: ${quote.riskScoreBps}\n` +
     `utilizationSurchargeBps: ${quote.utilizationSurchargeBps}\n` +
     `expiry: ${new Date(Number(quote.expiry) * 1000).toLocaleString()}\n` +
     `marketOpen: ${marketOpen}`;

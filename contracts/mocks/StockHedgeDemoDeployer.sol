@@ -4,7 +4,9 @@ pragma solidity ^0.8.20;
 import "../core/InsuranceVault.sol";
 import "../core/PolicyFactory.sol";
 import "../engines/PricingOracle.sol";
+import "../interfaces/IRiskParameterProvider.sol";
 import "./MockPriceFeed.sol";
+import "./MockRiskParameterProvider.sol";
 import "./MockUSDC.sol";
 
 contract StockHedgeDemoDeployer {
@@ -15,14 +17,11 @@ contract StockHedgeDemoDeployer {
     uint256 public constant INITIAL_USER_BALANCE = 100_000e6;
 
     MockUSDC public immutable mockUsdc;
+    MockRiskParameterProvider public immutable riskParameterProvider;
     MockPriceFeed public immutable aaplSpotFeed;
-    MockPriceFeed public immutable aaplVolFeed;
     MockPriceFeed public immutable tslaSpotFeed;
-    MockPriceFeed public immutable tslaVolFeed;
     MockPriceFeed public immutable nvdaSpotFeed;
-    MockPriceFeed public immutable nvdaVolFeed;
     MockPriceFeed public immutable msftSpotFeed;
-    MockPriceFeed public immutable msftVolFeed;
     PricingOracle public immutable pricingOracle;
     InsuranceVault public immutable insuranceVault;
     PolicyFactory public immutable policyFactory;
@@ -33,53 +32,79 @@ contract StockHedgeDemoDeployer {
         if (finalOwner == address(0)) revert InvalidOwner();
 
         mockUsdc = new MockUSDC(address(this));
+        riskParameterProvider = new MockRiskParameterProvider(address(this));
         aaplSpotFeed = new MockPriceFeed(185e8, 8, finalOwner);
-        aaplVolFeed = new MockPriceFeed(2_800, 2, finalOwner);
         tslaSpotFeed = new MockPriceFeed(172e8, 8, finalOwner);
-        tslaVolFeed = new MockPriceFeed(4_200, 2, finalOwner);
         nvdaSpotFeed = new MockPriceFeed(890e8, 8, finalOwner);
-        nvdaVolFeed = new MockPriceFeed(3_600, 2, finalOwner);
         msftSpotFeed = new MockPriceFeed(415e8, 8, finalOwner);
-        msftVolFeed = new MockPriceFeed(2_100, 2, finalOwner);
 
-        pricingOracle = new PricingOracle(address(this));
+        pricingOracle = new PricingOracle(address(this), address(riskParameterProvider));
         insuranceVault = new InsuranceVault(address(this), address(mockUsdc));
         policyFactory = new PolicyFactory(finalOwner, address(insuranceVault), address(pricingOracle));
 
-        pricingOracle.configureMarket(AAPL, _marketConfig(address(aaplSpotFeed), address(aaplVolFeed), 150, 120, 90));
-        pricingOracle.configureMarket(TSLA, _marketConfig(address(tslaSpotFeed), address(tslaVolFeed), 190, 180, 140));
-        pricingOracle.configureMarket(NVDA, _marketConfig(address(nvdaSpotFeed), address(nvdaVolFeed), 175, 150, 120));
-        pricingOracle.configureMarket(MSFT, _marketConfig(address(msftSpotFeed), address(msftVolFeed), 135, 100, 85));
+        pricingOracle.configureMarket(AAPL, _marketConfig(address(aaplSpotFeed), 150));
+        pricingOracle.configureMarket(TSLA, _marketConfig(address(tslaSpotFeed), 190));
+        pricingOracle.configureMarket(NVDA, _marketConfig(address(nvdaSpotFeed), 175));
+        pricingOracle.configureMarket(MSFT, _marketConfig(address(msftSpotFeed), 135));
+
+        riskParameterProvider.setRiskSnapshot(AAPL, _riskSnapshot(2800, 120, 90, 10250, 10000, 9650, 80, 45, 55, 6200, "MANUAL_AAPL"));
+        riskParameterProvider.setRiskSnapshot(TSLA, _riskSnapshot(4200, 180, 140, 10800, 10300, 9800, 130, 90, 85, 7600, "MANUAL_TSLA"));
+        riskParameterProvider.setRiskSnapshot(NVDA, _riskSnapshot(3600, 150, 120, 10550, 10150, 9750, 110, 70, 70, 7100, "MANUAL_NVDA"));
+        riskParameterProvider.setRiskSnapshot(MSFT, _riskSnapshot(2100, 100, 85, 10150, 9950, 9700, 60, 35, 40, 5400, "MANUAL_MSFT"));
 
         insuranceVault.setPolicyManager(address(policyFactory));
         pricingOracle.transferOwnership(finalOwner);
         insuranceVault.transferOwnership(finalOwner);
         mockUsdc.mint(finalOwner, INITIAL_USER_BALANCE);
         mockUsdc.transferOwnership(finalOwner);
+        riskParameterProvider.transferOwnership(finalOwner);
     }
 
     function _marketConfig(
         address spotFeed,
-        address volFeed,
-        uint256 basePremiumBps,
-        uint256 downsideRiskBps,
-        uint256 upsideRiskBps
+        uint256 basePremiumBps
     ) internal pure returns (PricingOracle.MarketConfigInput memory marketConfig) {
         marketConfig = PricingOracle.MarketConfigInput({
             spotFeed: spotFeed,
-            volFeed: volFeed,
             minDuration: 1 hours,
             maxDuration: 30 days,
             basePremiumBps: basePremiumBps,
             maxNotional: 50_000e6,
-            downsideRiskBps: downsideRiskBps,
-            upsideRiskBps: upsideRiskBps,
             minTriggerBps: 500,
             maxTriggerBps: 2_000,
             openMinutesUtc: 570,
             closeMinutesUtc: 960,
             enforceMarketHours: false,
             isActive: true
+        });
+    }
+
+    function _riskSnapshot(
+        uint256 impliedVolBps,
+        uint256 downsideSkewBps,
+        uint256 upsideSkewBps,
+        uint256 shortTermMultiplierBps,
+        uint256 mediumTermMultiplierBps,
+        uint256 longTermMultiplierBps,
+        uint256 downsideInventoryPressureBps,
+        uint256 upsideInventoryPressureBps,
+        uint256 stressPremiumBps,
+        uint256 riskScoreBps,
+        bytes32 sourceTag
+    ) internal view returns (IRiskParameterProvider.RiskSnapshot memory snapshot) {
+        snapshot = IRiskParameterProvider.RiskSnapshot({
+            impliedVolBps: impliedVolBps,
+            downsideSkewBps: downsideSkewBps,
+            upsideSkewBps: upsideSkewBps,
+            shortTermMultiplierBps: shortTermMultiplierBps,
+            mediumTermMultiplierBps: mediumTermMultiplierBps,
+            longTermMultiplierBps: longTermMultiplierBps,
+            downsideInventoryPressureBps: downsideInventoryPressureBps,
+            upsideInventoryPressureBps: upsideInventoryPressureBps,
+            stressPremiumBps: stressPremiumBps,
+            riskScoreBps: riskScoreBps,
+            updatedAt: block.timestamp,
+            sourceTag: sourceTag
         });
     }
 }
