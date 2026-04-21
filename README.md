@@ -8,6 +8,7 @@ The project now includes the Phase 4 pricing upgrade:
 - richer risk parameters are supplied by a separate risk provider contract
 - pricing differentiates by symbol, direction, term bucket, vault utilization, and inventory stress
 - the architecture is ready for a future off-chain risk engine such as `Chainlink Functions` or a backend service
+- Phase 5 market logic adds U.S. equity session handling, DST-aware clocks, holiday closures, close-buffer purchase blocking, and next-open settlement rules
 
 ## Architecture
 
@@ -91,6 +92,23 @@ In the demo, these values come from `MockRiskParameterProvider`. In a fuller ver
 - stress premium and risk-score adjustments
 
 This keeps the chain-facing logic simple enough for testing while leaving the complex market estimation off-chain.
+
+## Phase 5 market logic
+
+The market-hours layer is now more specific to U.S. equities.
+
+- `PricingOracle` can interpret session times as U.S. local market times instead of raw UTC windows
+- daylight saving time is handled for U.S. Eastern market sessions
+- owner-managed holiday closures can disable quoting and settlement windows for observed market holidays
+- quotes can be blocked near the close through a configurable `closeBufferMinutes`
+- policies that cross a market close can receive an `overnightGapSurchargeBps`
+- markets can be configured to settle against the first allowed post-expiry market-open window instead of immediately during a closed session
+
+The current closed-market settlement rule is:
+
+- if a policy expires while the market is open, it can settle once expiry has passed
+- if a policy expires while the market is closed and the market uses `NextMarketOpen` settlement mode, settlement is blocked until the next valid open session
+- the demo then reads the current oracle price when settlement becomes allowed
 
 ## Supported symbols
 
@@ -190,5 +208,10 @@ The current Hardhat suite covers:
 - cancellation blocked during the lock delay
 - LP withdrawals blocked while liquidity remains reserved
 - market-hours enforcement checks
+- DST-aware U.S. market open checks
+- holiday closure checks
+- near-close purchase blocking
+- overnight gap surcharge behavior
+- next-open settlement gating for after-hours expiry
 - utilization validation above `100%`
 - underwriting result and LP share-price tracking after profitable underwriting

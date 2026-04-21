@@ -2,6 +2,11 @@
 pragma solidity ^0.8.20;
 
 interface IPricingEngine {
+    enum SettlementMode {
+        CurrentPrice,
+        NextMarketOpen
+    }
+
     struct PremiumQuote {
         uint256 premium;
         uint256 spotPrice;
@@ -17,14 +22,17 @@ interface IPricingEngine {
         uint256 stressPremiumBps;
         uint256 riskScoreBps;
         uint256 utilizationSurchargeBps;
+        uint256 overnightGapSurchargeBps;
         uint16 triggerBps;
         bool isDownsideProtection;
+        bool settlesAtNextOpen;
         uint256 expiry;
+        uint256 effectiveSettlementTime;
     }
 
     struct MarketHours {
-        uint16 openMinutesUtc;
-        uint16 closeMinutesUtc;
+        uint16 openMinutes;
+        uint16 closeMinutes;
         bool enforceWindow;
     }
 
@@ -40,6 +48,11 @@ interface IPricingEngine {
     ) external view returns (PremiumQuote memory quote);
 
     function getSpotPrice(bytes32 symbol) external view returns (uint256);
+
+    function getSettlementPrice(bytes32 symbol, uint256 scheduledExpiry)
+        external
+        view
+        returns (uint256 price, uint256 effectiveTimestamp);
 
     function isMarketOpen(bytes32 symbol) external view returns (bool);
 

@@ -2,12 +2,14 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { loadFixture, time } = require("@nomicfoundation/hardhat-toolbox/network-helpers");
 
-describe("Phase 4 Pricing Lifecycle", function () {
+describe("Phase 5 Market Lifecycle", function () {
   const AAPL = ethers.encodeBytes32String("AAPL");
   const MSFT = ethers.encodeBytes32String("MSFT");
   const NVDA = ethers.encodeBytes32String("NVDA");
   const TSLA = ethers.encodeBytes32String("TSLA");
   const USDC_DECIMALS = 6;
+  const SETTLEMENT_MODE_CURRENT = 0;
+  const SETTLEMENT_MODE_NEXT_OPEN = 1;
 
   function riskSnapshot({
     impliedVolBps,
@@ -77,9 +79,13 @@ describe("Phase 4 Pricing Lifecycle", function () {
       maxNotional: ethers.parseUnits("50000", USDC_DECIMALS),
       minTriggerBps: 500,
       maxTriggerBps: 2000,
-      openMinutesUtc: 570,
-      closeMinutesUtc: 960,
+      openMinutesLocal: 570,
+      closeMinutesLocal: 960,
+      closeBufferMinutes: 15,
+      overnightGapSurchargeBps: 120,
       enforceMarketHours: false,
+      useUsEquityCalendar: true,
+      settlementMode: SETTLEMENT_MODE_NEXT_OPEN,
       isActive: true
     };
 
@@ -184,6 +190,10 @@ describe("Phase 4 Pricing Lifecycle", function () {
     await insuranceVault.connect(account).deposit(amount);
   }
 
+  function utcTimestamp(year, monthIndex, day, hour, minute = 0) {
+    return Math.floor(Date.UTC(year, monthIndex, day, hour, minute, 0) / 1000);
+  }
+
   it("quotes and purchases a downside policy", async function () {
     const { lp, buyer, mockUsdc, pricingOracle, insuranceVault, policyFactory } = await loadFixture(deployFixture);
 
@@ -203,6 +213,7 @@ describe("Phase 4 Pricing Lifecycle", function () {
     expect(quote.annualVolBps).to.equal(2800);
     expect(quote.directionalRiskBps).to.equal(120);
     expect(quote.termStructureMultiplierBps).to.equal(10250);
+    expect(quote.overnightGapSurchargeBps).to.equal(120);
     expect(await pricingOracle.isSupportedSymbol(AAPL)).to.equal(true);
 
     await mockUsdc.connect(buyer).approve(await insuranceVault.getAddress(), quote.premium);
@@ -385,9 +396,13 @@ describe("Phase 4 Pricing Lifecycle", function () {
       maxNotional: ethers.parseUnits("50000", USDC_DECIMALS),
       minTriggerBps: 500,
       maxTriggerBps: 2000,
-      openMinutesUtc: 570,
-      closeMinutesUtc: 960,
+      openMinutesLocal: 570,
+      closeMinutesLocal: 960,
+      closeBufferMinutes: 15,
+      overnightGapSurchargeBps: 120,
       enforceMarketHours: false,
+      useUsEquityCalendar: true,
+      settlementMode: SETTLEMENT_MODE_NEXT_OPEN,
       isActive: true
     });
 
@@ -467,7 +482,7 @@ describe("Phase 4 Pricing Lifecycle", function () {
     );
   });
 
-  it("respects configured market hours when enforcement is enabled", async function () {
+  it("respects US market hours in both standard time and daylight saving time", async function () {
     const { pricingOracle, baseConfig } = await loadFixture(deployFixture);
 
     await pricingOracle.configureMarket(ethers.encodeBytes32String("AMD"), {
@@ -475,18 +490,155 @@ describe("Phase 4 Pricing Lifecycle", function () {
       enforceMarketHours: true
     });
 
-    const latest = await time.latest();
-    let targetDay = Math.floor(latest / 86400) + 1;
-
-    while (((targetDay + 4) % 7) === 0 || ((targetDay + 4) % 7) === 6) {
-      targetDay += 1;
-    }
-
-    await time.increaseTo(targetDay * 86400 + 2 * 3600);
+    await time.increaseTo(utcTimestamp(2026, 6, 15, 13, 0));
     expect(await pricingOracle.isMarketOpen(ethers.encodeBytes32String("AMD"))).to.equal(false);
 
-    await time.increaseTo(targetDay * 86400 + 10 * 3600);
+    await time.increaseTo(utcTimestamp(2026, 6, 15, 14, 0));
     expect(await pricingOracle.isMarketOpen(ethers.encodeBytes32String("AMD"))).to.equal(true);
+
+    await time.increaseTo(utcTimestamp(2026, 11, 15, 14, 0));
+    expect(await pricingOracle.isMarketOpen(ethers.encodeBytes32String("AMD"))).to.equal(false);
+
+    await time.increaseTo(utcTimestamp(2026, 11, 15, 15, 0));
+    expect(await pricingOracle.isMarketOpen(ethers.encodeBytes32String("AMD"))).to.equal(true);
+  });
+
+  it("treats configured US holidays as closed market days", async function () {
+    const { pricingOracle, policyFactory, baseConfig } = await loadFixture(deployFixture);
+    const IBM = ethers.encodeBytes32String("IBM");
+    const MockPriceFeed = await ethers.getContractFactory("MockPriceFeed");
+    const ibmSpotFeed = await MockPriceFeed.deploy(250n * 10n ** 8n, 8, (await ethers.getSigners())[0].address);
+    await ibmSpotFeed.waitForDeployment();
+
+    await pricingOracle.configureMarket(IBM, {
+      ...baseConfig,
+      spotFeed: await ibmSpotFeed.getAddress(),
+      enforceMarketHours: true
+    });
+    await pricingOracle.setHolidayClosure(20260703, true);
+
+    await time.increaseTo(utcTimestamp(2026, 6, 3, 14, 0));
+    expect(await pricingOracle.isMarketOpen(IBM)).to.equal(false);
+    await expect(
+      policyFactory.previewPolicy(
+        IBM,
+        true,
+        ethers.parseUnits("1000", USDC_DECIMALS),
+        24 * 3600,
+        1000,
+        0,
+        ethers.parseUnits("500", USDC_DECIMALS)
+      )
+    ).to.be.revertedWithCustomError(pricingOracle, "MarketClosed");
+  });
+
+  it("blocks new policies too close to the close and adds overnight gap surcharge across sessions", async function () {
+    const { pricingOracle, policyFactory, baseConfig } = await loadFixture(deployFixture);
+    const ORCL = ethers.encodeBytes32String("ORCL");
+    const MockPriceFeed = await ethers.getContractFactory("MockPriceFeed");
+    const orclSpotFeed = await MockPriceFeed.deploy(145n * 10n ** 8n, 8, (await ethers.getSigners())[0].address);
+    await orclSpotFeed.waitForDeployment();
+
+    await pricingOracle.configureMarket(ORCL, {
+      ...baseConfig,
+      spotFeed: await orclSpotFeed.getAddress(),
+      enforceMarketHours: true
+    });
+    const riskProvider = await ethers.getContractAt(
+      "MockRiskParameterProvider",
+      await pricingOracle.riskParameterProvider()
+    );
+    await riskProvider.setRiskSnapshot(
+      ORCL,
+      riskSnapshot({
+        impliedVolBps: 2600,
+        downsideSkewBps: 110,
+        upsideSkewBps: 85,
+        shortTermMultiplierBps: 10100,
+        mediumTermMultiplierBps: 9950,
+        longTermMultiplierBps: 9700,
+        downsideInventoryPressureBps: 70,
+        upsideInventoryPressureBps: 45,
+        stressPremiumBps: 45,
+        riskScoreBps: 5800,
+        sourceTag: "TEST_ORCL"
+      })
+    );
+
+    await time.increaseTo(utcTimestamp(2026, 6, 15, 14, 0));
+    const intradayQuote = await policyFactory.previewPolicy(
+      ORCL,
+      true,
+      ethers.parseUnits("1000", USDC_DECIMALS),
+      2 * 3600,
+      1000,
+      0,
+      ethers.parseUnits("500", USDC_DECIMALS)
+    );
+    const overnightQuote = await policyFactory.previewPolicy(
+      ORCL,
+      true,
+      ethers.parseUnits("1000", USDC_DECIMALS),
+      24 * 3600,
+      1000,
+      0,
+      ethers.parseUnits("500", USDC_DECIMALS)
+    );
+
+    expect(intradayQuote.overnightGapSurchargeBps).to.equal(0);
+    expect(overnightQuote.overnightGapSurchargeBps).to.equal(120);
+
+    await time.increaseTo(utcTimestamp(2026, 6, 15, 19, 50));
+    await expect(
+      policyFactory.previewPolicy(
+        ORCL,
+        true,
+        ethers.parseUnits("1000", USDC_DECIMALS),
+        2 * 3600,
+        1000,
+        0,
+        ethers.parseUnits("500", USDC_DECIMALS)
+      )
+    ).to.be.revertedWithCustomError(pricingOracle, "MarketClosingSoon");
+  });
+
+  it("settles after hours policies on the next market open window", async function () {
+    const { lp, buyer, mockUsdc, spotFeed, pricingOracle, insuranceVault, policyFactory, baseConfig } =
+      await loadFixture(deployFixture);
+
+    await pricingOracle.configureMarket(AAPL, {
+      ...baseConfig,
+      spotFeed: await spotFeed.getAddress(),
+      enforceMarketHours: true,
+      settlementMode: SETTLEMENT_MODE_NEXT_OPEN
+    });
+
+    const lpDeposit = ethers.parseUnits("10000", USDC_DECIMALS);
+    const notional = ethers.parseUnits("1000", USDC_DECIMALS);
+    const payoutCap = ethers.parseUnits("500", USDC_DECIMALS);
+
+    await approveAndDeposit(mockUsdc, insuranceVault, lp, lpDeposit);
+    await time.increaseTo(utcTimestamp(2026, 6, 15, 17, 0));
+    const quote = await policyFactory.previewPolicy(AAPL, true, notional, 8 * 3600, 1000, 0, payoutCap);
+
+    await mockUsdc.connect(buyer).approve(await insuranceVault.getAddress(), quote.premium);
+    await policyFactory.connect(buyer).purchasePolicy(AAPL, true, notional, 8 * 3600, 1000, 0, payoutCap);
+
+    const policy = await policyFactory.getPolicy(1);
+    await spotFeed.setAnswer(150n * 10n ** 8n);
+
+    await time.increaseTo(Number(policy.expiry) + 1);
+    await expect(policyFactory.settlePolicy(1)).to.be.revertedWithCustomError(
+      pricingOracle,
+      "SettlementPricePending"
+    );
+
+    await time.increaseTo(Number(quote.effectiveSettlementTime) + 1);
+    await policyFactory.settlePolicy(1);
+
+    const settledPolicy = await policyFactory.getPolicy(1);
+    expect(settledPolicy.status).to.equal(1);
+    expect(settledPolicy.exitPrice).to.equal(ethers.parseEther("150"));
   });
 
   it("rejects utilization above 100 percent", async function () {

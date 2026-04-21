@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "../core/InsuranceVault.sol";
 import "../core/PolicyFactory.sol";
 import "../engines/PricingOracle.sol";
+import "../interfaces/IPricingEngine.sol";
 import "../interfaces/IRiskParameterProvider.sol";
 import "./MockPriceFeed.sol";
 import "./MockRiskParameterProvider.sol";
@@ -15,6 +16,7 @@ contract StockHedgeDemoDeployer {
     bytes32 public constant NVDA = bytes32("NVDA");
     bytes32 public constant MSFT = bytes32("MSFT");
     uint256 public constant INITIAL_USER_BALANCE = 100_000e6;
+    uint8 private constant SETTLEMENT_MODE_NEXT_OPEN = 1;
 
     MockUSDC public immutable mockUsdc;
     MockRiskParameterProvider public immutable riskParameterProvider;
@@ -72,9 +74,13 @@ contract StockHedgeDemoDeployer {
             maxNotional: 50_000e6,
             minTriggerBps: 500,
             maxTriggerBps: 2_000,
-            openMinutesUtc: 570,
-            closeMinutesUtc: 960,
+            openMinutesLocal: 570,
+            closeMinutesLocal: 960,
+            closeBufferMinutes: 15,
+            overnightGapSurchargeBps: 120,
             enforceMarketHours: false,
+            useUsEquityCalendar: true,
+            settlementMode: IPricingEngine.SettlementMode(SETTLEMENT_MODE_NEXT_OPEN),
             isActive: true
         });
     }

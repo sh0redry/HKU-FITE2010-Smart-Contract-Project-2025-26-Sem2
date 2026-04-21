@@ -170,7 +170,7 @@ contract PolicyFactory {
         if (policy.status != PolicyStatus.Active) revert PolicyNotActive();
         if (block.timestamp < policy.expiry) revert PolicyNotExpired();
 
-        uint256 exitPrice = pricingEngine.getSpotPrice(policy.symbol);
+        (uint256 exitPrice,) = pricingEngine.getSettlementPrice(policy.symbol, policy.expiry);
         uint256 payout = _calculatePayout(policy, exitPrice);
 
         policy.exitPrice = exitPrice;

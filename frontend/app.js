@@ -10,7 +10,7 @@ const state = {
 };
 
 const policyFactoryAbi = [
-  "function previewPolicy(bytes32 symbol, bool isDownsideProtection, uint256 notional, uint256 duration, uint16 triggerBps, uint256 deductible, uint256 payoutCap) view returns ((uint256 premium, uint256 spotPrice, uint256 strikePrice, uint256 notional, uint256 deductible, uint256 payoutCap, uint256 annualVolBps, uint256 estimatedProbabilityBps, uint256 termStructureMultiplierBps, uint256 directionalRiskBps, uint256 inventoryPressureBps, uint256 stressPremiumBps, uint256 riskScoreBps, uint256 utilizationSurchargeBps, uint16 triggerBps, bool isDownsideProtection, uint256 expiry))",
+  "function previewPolicy(bytes32 symbol, bool isDownsideProtection, uint256 notional, uint256 duration, uint16 triggerBps, uint256 deductible, uint256 payoutCap) view returns ((uint256 premium, uint256 spotPrice, uint256 strikePrice, uint256 notional, uint256 deductible, uint256 payoutCap, uint256 annualVolBps, uint256 estimatedProbabilityBps, uint256 termStructureMultiplierBps, uint256 directionalRiskBps, uint256 inventoryPressureBps, uint256 stressPremiumBps, uint256 riskScoreBps, uint256 utilizationSurchargeBps, uint256 overnightGapSurchargeBps, uint16 triggerBps, bool isDownsideProtection, bool settlesAtNextOpen, uint256 expiry, uint256 effectiveSettlementTime))",
   "function purchasePolicy(bytes32 symbol, bool isDownsideProtection, uint256 notional, uint256 duration, uint16 triggerBps, uint256 deductible, uint256 payoutCap) returns (uint256)",
   "function settlePolicy(uint256 policyId)",
   "function cancelPolicy(uint256 policyId)",
@@ -36,7 +36,8 @@ const vaultAbi = [
 
 const oracleAbi = [
   "function isMarketOpen(bytes32 symbol) view returns (bool)",
-  "function getSpotPrice(bytes32 symbol) view returns (uint256)"
+  "function getSpotPrice(bytes32 symbol) view returns (uint256)",
+  "function getSettlementPrice(bytes32 symbol, uint256 scheduledExpiry) view returns (uint256 price, uint256 effectiveTimestamp)"
 ];
 
 const erc20Abi = [
@@ -192,7 +193,10 @@ async function getQuote() {
     `stressPremiumBps: ${quote.stressPremiumBps}\n` +
     `riskScoreBps: ${quote.riskScoreBps}\n` +
     `utilizationSurchargeBps: ${quote.utilizationSurchargeBps}\n` +
+    `overnightGapSurchargeBps: ${quote.overnightGapSurchargeBps}\n` +
+    `settlesAtNextOpen: ${quote.settlesAtNextOpen}\n` +
     `expiry: ${new Date(Number(quote.expiry) * 1000).toLocaleString()}\n` +
+    `effectiveSettlementTime: ${new Date(Number(quote.effectiveSettlementTime) * 1000).toLocaleString()}\n` +
     `marketOpen: ${marketOpen}`;
 
   log("Quote refreshed.");

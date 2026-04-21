@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { ethers } = require("hardhat");
+const SETTLEMENT_MODE_NEXT_OPEN = 1;
 
 function riskSnapshot({
   impliedVolBps,
@@ -144,9 +145,13 @@ async function main() {
       maxNotional: ethers.parseUnits("50000", 6),
       minTriggerBps: 500,
       maxTriggerBps: 2000,
-      openMinutesUtc: 570,
-      closeMinutesUtc: 960,
+      openMinutesLocal: 570,
+      closeMinutesLocal: 960,
+      closeBufferMinutes: 15,
+      overnightGapSurchargeBps: 120,
       enforceMarketHours: false,
+      useUsEquityCalendar: true,
+      settlementMode: SETTLEMENT_MODE_NEXT_OPEN,
       isActive: true
     });
 
