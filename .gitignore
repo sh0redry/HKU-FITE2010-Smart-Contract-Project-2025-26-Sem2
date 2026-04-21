@@ -44,3 +44,5 @@ coverage.json
 # 临时文件
 tmp/
 temp/
+
+*.docx

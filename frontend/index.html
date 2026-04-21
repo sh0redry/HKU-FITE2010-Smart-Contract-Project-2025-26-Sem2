@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>US Stock Hedge Insurance Demo</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <p class="eyebrow">US Stock Insurance MVP</p>
+      <h1>Simple front-end for testing AAPL hedge policies</h1>
+      <p class="lede">
+        Connect a wallet, point to your deployed demo contracts, quote a policy, buy coverage, settle it after expiry,
+        and test LP deposit and withdrawal flows.
+      </p>
+      <button id="connectButton">Connect Wallet</button>
+      <p id="walletStatus" class="muted">Wallet not connected.</p>
+    </section>
+
+    <section class="card">
+      <h2>Contract Addresses</h2>
+      <label>Policy Factory <input id="policyFactoryAddress" placeholder="0x..." /></label>
+      <label>Insurance Vault <input id="vaultAddress" placeholder="0x..." /></label>
+      <label>Pricing Oracle <input id="oracleAddress" placeholder="0x..." /></label>
+      <button id="saveAddressesButton">Load Contracts</button>
+      <p class="muted">If you use `StockHedgeDemoDeployer`, copy the three child contract addresses into these fields.</p>
+    </section>
+
+    <section class="grid">
+      <section class="card">
+        <h2>Quote & Buy Policy</h2>
+        <label>Ticker <input id="symbolInput" value="AAPL" maxlength="10" /></label>
+        <label>Coverage (ETH) <input id="coverageInput" type="number" min="0" step="0.01" value="1" /></label>
+        <label>Duration (hours) <input id="durationInput" type="number" min="1" step="1" value="24" /></label>
+        <label>Direction
+          <select id="directionInput">
+            <option value="down">Downside Protection</option>
+            <option value="up">Upside Protection</option>
+          </select>
+        </label>
+        <button id="quoteButton">Get Quote</button>
+        <button id="buyButton">Buy Policy</button>
+        <pre id="quoteOutput">No quote loaded.</pre>
+      </section>
+
+      <section class="card">
+        <h2>Settle Policy</h2>
+        <label>Policy ID <input id="settlePolicyIdInput" type="number" min="1" step="1" /></label>
+        <button id="settleButton">Settle</button>
+        <button id="loadPoliciesButton">Load My Policies</button>
+        <pre id="policiesOutput">No policies loaded.</pre>
+      </section>
+
+      <section class="card">
+        <h2>LP Vault</h2>
+        <label>Deposit (ETH) <input id="depositInput" type="number" min="0" step="0.01" value="1" /></label>
+        <button id="depositButton">Deposit Liquidity</button>
+        <label>Withdraw Shares <input id="withdrawInput" type="number" min="0" step="0.01" value="0.5" /></label>
+        <button id="withdrawButton">Withdraw</button>
+        <button id="vaultStateButton">Refresh Vault</button>
+        <pre id="vaultOutput">Vault state unavailable.</pre>
+      </section>
+    </section>
+
+    <section class="card">
+      <h2>Activity</h2>
+      <pre id="logOutput">Ready.</pre>
+    </section>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
