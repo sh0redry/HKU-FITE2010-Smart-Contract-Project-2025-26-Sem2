@@ -12,7 +12,7 @@ const policyFactoryAbi = [
   "function purchasePolicy(bytes32 symbol, bool isDownsideProtection, uint256 coverageAmount, uint256 duration) payable returns (uint256)",
   "function settlePolicy(uint256 policyId)",
   "function getPoliciesByHolder(address holder) view returns (uint256[])",
-  "function policies(uint256 policyId) view returns (uint256 id, address holder, bytes32 symbol, bool isDownsideProtection, uint256 coverageAmount, uint256 premiumPaid, uint256 entryPrice, uint256 exitPrice, uint256 startedAt, uint256 expiry, uint256 reservedLiquidity, uint256 payoutAmount, uint8 status)"
+  "function getPolicy(uint256 policyId) view returns ((uint256 id, address holder, bytes32 symbol, bool isDownsideProtection, uint256 coverageAmount, uint256 premiumPaid, uint256 entryPrice, uint256 exitPrice, uint256 startedAt, uint256 expiry, uint256 reservedLiquidity, uint256 payoutAmount, uint8 status))"
 ];
 
 const vaultAbi = [
@@ -185,7 +185,7 @@ async function loadPolicies() {
 
   const rows = [];
   for (const id of policyIds) {
-    const policy = await state.contracts.policyFactory.policies(id);
+    const policy = await state.contracts.policyFactory.getPolicy(id);
     rows.push({
       id: policy.id.toString(),
       symbol: ethers.decodeBytes32String(policy.symbol),

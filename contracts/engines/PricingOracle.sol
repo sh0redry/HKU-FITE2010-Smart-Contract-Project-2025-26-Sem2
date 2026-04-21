@@ -26,7 +26,7 @@ contract PricingOracle is IPricingEngine {
         bool isActive;
     }
 
-    mapping(bytes32 => MarketConfig) public marketConfigs;
+    mapping(bytes32 => MarketConfig) private marketConfigs;
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event MarketConfigured(
@@ -148,6 +148,10 @@ contract PricingOracle is IPricingEngine {
 
     function isSupportedSymbol(bytes32 symbol) external view returns (bool) {
         return marketConfigs[symbol].isActive;
+    }
+
+    function getMarketConfig(bytes32 symbol) external view returns (MarketConfig memory) {
+        return marketConfigs[symbol];
     }
 
     function _utilizationSurcharge(uint256 utilizationBpsValue) internal pure returns (uint256) {

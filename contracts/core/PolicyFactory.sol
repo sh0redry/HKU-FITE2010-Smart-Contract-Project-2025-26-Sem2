@@ -35,7 +35,7 @@ contract PolicyFactory {
 
     uint256 public nextPolicyId = 1;
 
-    mapping(uint256 => Policy) public policies;
+    mapping(uint256 => Policy) private policies;
     mapping(address => uint256[]) public policyIdsByHolder;
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -174,6 +174,10 @@ contract PolicyFactory {
 
     function getPoliciesByHolder(address holder) external view returns (uint256[] memory) {
         return policyIdsByHolder[holder];
+    }
+
+    function getPolicy(uint256 policyId) external view returns (Policy memory) {
+        return policies[policyId];
     }
 
     function previewPolicy(
