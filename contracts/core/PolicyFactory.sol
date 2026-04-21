@@ -6,6 +6,7 @@ import "../interfaces/IPricingEngine.sol";
 
 contract PolicyFactory {
     uint256 public constant BPS = 10_000;
+    uint256 public constant MIN_CANCEL_DELAY = 30 minutes;
 
     enum PolicyStatus {
         Active,
@@ -18,12 +19,17 @@ contract PolicyFactory {
         address holder;
         bytes32 symbol;
         bool isDownsideProtection;
-        uint256 coverageAmount;
+        uint16 triggerBps;
+        uint256 strikePrice;
+        uint256 notional;
+        uint256 deductible;
+        uint256 payoutCap;
         uint256 premiumPaid;
         uint256 entryPrice;
         uint256 exitPrice;
-        uint256 startedAt;
+        uint256 createdAt;
         uint256 expiry;
+        uint256 settledAt;
         uint256 reservedLiquidity;
         uint256 payoutAmount;
         PolicyStatus status;
@@ -44,7 +50,11 @@ contract PolicyFactory {
         address indexed holder,
         bytes32 indexed symbol,
         bool isDownsideProtection,
-        uint256 coverageAmount,
+        uint16 triggerBps,
+        uint256 strikePrice,
+        uint256 notional,
+        uint256 deductible,
+        uint256 payoutCap,
         uint256 premiumPaid,
         uint256 entryPrice,
         uint256 expiry
@@ -55,6 +65,7 @@ contract PolicyFactory {
         uint256 payoutAmount,
         uint256 releasedLiquidity
     );
+    event PolicyCancelled(uint256 indexed policyId, address indexed holder, uint256 releasedLiquidity, uint256 cancelledAt);
 
     error NotOwner();
     error InvalidAddress();
@@ -62,8 +73,9 @@ contract PolicyFactory {
     error UnsupportedSymbol(bytes32 symbol);
     error PolicyNotActive();
     error PolicyNotExpired();
-    error PremiumTooLow(uint256 expected, uint256 actual);
-    error RefundFailed();
+    error PolicyExpired();
+    error CancellationLocked();
+    error NotPolicyHolder();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -91,26 +103,28 @@ contract PolicyFactory {
     function purchasePolicy(
         bytes32 symbol,
         bool isDownsideProtection,
-        uint256 coverageAmount,
-        uint256 duration
-    ) external payable returns (uint256 policyId) {
-        if (coverageAmount == 0) revert InvalidAmount();
+        uint256 notional,
+        uint256 duration,
+        uint16 triggerBps,
+        uint256 deductible,
+        uint256 payoutCap
+    ) external returns (uint256 policyId) {
+        if (notional == 0 || payoutCap == 0) revert InvalidAmount();
         if (!pricingEngine.isSupportedSymbol(symbol)) revert UnsupportedSymbol(symbol);
 
         IPricingEngine.PremiumQuote memory quote = pricingEngine.quotePremium(
             symbol,
-            coverageAmount,
+            notional,
             duration,
+            triggerBps,
+            deductible,
+            payoutCap,
             vault.utilizationBps(),
             isDownsideProtection
         );
 
-        if (msg.value < quote.premium) {
-            revert PremiumTooLow(quote.premium, msg.value);
-        }
-
-        vault.reserveLiquidity(coverageAmount);
-        vault.collectPremium{value: quote.premium}();
+        vault.reserveLiquidity(quote.payoutCap);
+        vault.collectPremium(msg.sender, quote.premium);
 
         policyId = nextPolicyId++;
         policies[policyId] = Policy({
@@ -118,13 +132,18 @@ contract PolicyFactory {
             holder: msg.sender,
             symbol: symbol,
             isDownsideProtection: isDownsideProtection,
-            coverageAmount: coverageAmount,
+            triggerBps: triggerBps,
+            strikePrice: quote.strikePrice,
+            notional: notional,
+            deductible: deductible,
+            payoutCap: payoutCap,
             premiumPaid: quote.premium,
             entryPrice: quote.spotPrice,
             exitPrice: 0,
-            startedAt: block.timestamp,
+            createdAt: block.timestamp,
             expiry: quote.expiry,
-            reservedLiquidity: coverageAmount,
+            settledAt: 0,
+            reservedLiquidity: quote.payoutCap,
             payoutAmount: 0,
             status: PolicyStatus.Active
         });
@@ -135,17 +154,15 @@ contract PolicyFactory {
             msg.sender,
             symbol,
             isDownsideProtection,
-            coverageAmount,
+            triggerBps,
+            quote.strikePrice,
+            notional,
+            deductible,
+            payoutCap,
             quote.premium,
             quote.spotPrice,
             quote.expiry
         );
-
-        uint256 refund = msg.value - quote.premium;
-        if (refund > 0) {
-            (bool success, ) = payable(msg.sender).call{value: refund}("");
-            if (!success) revert RefundFailed();
-        }
     }
 
     function settlePolicy(uint256 policyId) external {
@@ -154,14 +171,15 @@ contract PolicyFactory {
         if (block.timestamp < policy.expiry) revert PolicyNotExpired();
 
         uint256 exitPrice = pricingEngine.getSpotPrice(policy.symbol);
-        uint256 payout = _calculatePayout(policy.entryPrice, exitPrice, policy.coverageAmount, policy.isDownsideProtection);
+        uint256 payout = _calculatePayout(policy, exitPrice);
 
         policy.exitPrice = exitPrice;
         policy.payoutAmount = payout;
         policy.status = PolicyStatus.Settled;
+        policy.settledAt = block.timestamp;
 
         if (payout > 0) {
-            vault.payClaim(payable(policy.holder), payout);
+            vault.payClaim(policy.holder, payout);
         }
 
         uint256 releasedLiquidity = policy.reservedLiquidity - payout;
@@ -170,6 +188,20 @@ contract PolicyFactory {
         }
 
         emit PolicySettled(policyId, exitPrice, payout, releasedLiquidity);
+    }
+
+    function cancelPolicy(uint256 policyId) external {
+        Policy storage policy = policies[policyId];
+        if (policy.status != PolicyStatus.Active) revert PolicyNotActive();
+        if (msg.sender != policy.holder) revert NotPolicyHolder();
+        if (block.timestamp >= policy.expiry) revert PolicyExpired();
+        if (block.timestamp < policy.createdAt + MIN_CANCEL_DELAY) revert CancellationLocked();
+
+        policy.status = PolicyStatus.Cancelled;
+        policy.settledAt = block.timestamp;
+
+        vault.releaseLiquidity(policy.reservedLiquidity);
+        emit PolicyCancelled(policyId, msg.sender, policy.reservedLiquidity, block.timestamp);
     }
 
     function getPoliciesByHolder(address holder) external view returns (uint256[] memory) {
@@ -183,43 +215,50 @@ contract PolicyFactory {
     function previewPolicy(
         bytes32 symbol,
         bool isDownsideProtection,
-        uint256 coverageAmount,
-        uint256 duration
+        uint256 notional,
+        uint256 duration,
+        uint16 triggerBps,
+        uint256 deductible,
+        uint256 payoutCap
     ) external view returns (IPricingEngine.PremiumQuote memory quote) {
         if (!pricingEngine.isSupportedSymbol(symbol)) revert UnsupportedSymbol(symbol);
         return pricingEngine.quotePremium(
             symbol,
-            coverageAmount,
+            notional,
             duration,
+            triggerBps,
+            deductible,
+            payoutCap,
             vault.utilizationBps(),
             isDownsideProtection
         );
     }
 
-    function _calculatePayout(
-        uint256 entryPrice,
-        uint256 exitPrice,
-        uint256 coverageAmount,
-        bool isDownsideProtection
-    ) internal pure returns (uint256 payout) {
-        if (entryPrice == 0) {
+    function _calculatePayout(Policy storage policy, uint256 exitPrice) internal view returns (uint256 payout) {
+        if (policy.entryPrice == 0) {
             return 0;
         }
 
-        if (isDownsideProtection) {
-            if (exitPrice >= entryPrice) {
+        uint256 rawPayout;
+        if (policy.isDownsideProtection) {
+            if (exitPrice >= policy.strikePrice) {
                 return 0;
             }
-            payout = (coverageAmount * (entryPrice - exitPrice)) / entryPrice;
+            rawPayout = (policy.notional * (policy.strikePrice - exitPrice)) / policy.entryPrice;
         } else {
-            if (exitPrice <= entryPrice) {
+            if (exitPrice <= policy.strikePrice) {
                 return 0;
             }
-            payout = (coverageAmount * (exitPrice - entryPrice)) / entryPrice;
+            rawPayout = (policy.notional * (exitPrice - policy.strikePrice)) / policy.entryPrice;
         }
 
-        if (payout > coverageAmount) {
-            payout = coverageAmount;
+        if (rawPayout <= policy.deductible) {
+            return 0;
+        }
+
+        payout = rawPayout - policy.deductible;
+        if (payout > policy.payoutCap) {
+            payout = policy.payoutCap;
         }
     }
 }

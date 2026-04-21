@@ -2,6 +2,8 @@
 pragma solidity ^0.8.20;
 
 interface IInsuranceVault {
+    function settlementAsset() external view returns (address);
+
     function totalAssets() external view returns (uint256);
 
     function totalReserved() external view returns (uint256);
@@ -10,7 +12,17 @@ interface IInsuranceVault {
 
     function availableLiquidity() external view returns (uint256);
 
-    function deposit() external payable returns (uint256 sharesMinted);
+    function totalShares() external view returns (uint256);
+
+    function realizedPremiums() external view returns (uint256);
+
+    function totalClaimsPaid() external view returns (uint256);
+
+    function sharePrice() external view returns (uint256);
+
+    function netUnderwritingResult() external view returns (int256);
+
+    function deposit(uint256 assetAmount) external returns (uint256 sharesMinted);
 
     function withdraw(uint256 shareAmount) external returns (uint256 assetsOut);
 
@@ -18,7 +30,7 @@ interface IInsuranceVault {
 
     function releaseLiquidity(uint256 amount) external;
 
-    function collectPremium() external payable;
+    function collectPremium(address payer, uint256 amount) external;
 
-    function payClaim(address payable beneficiary, uint256 amount) external;
+    function payClaim(address beneficiary, uint256 amount) external;
 }

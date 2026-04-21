@@ -17,9 +17,11 @@ contract PricingOracle is IPricingEngine {
         uint256 minDuration;
         uint256 maxDuration;
         uint256 basePremiumBps;
-        uint256 maxCoverage;
+        uint256 maxNotional;
         uint256 downsideRiskBps;
         uint256 upsideRiskBps;
+        uint16 minTriggerBps;
+        uint16 maxTriggerBps;
         uint16 openMinutesUtc;
         uint16 closeMinutesUtc;
         bool enforceMarketHours;
@@ -32,9 +34,11 @@ contract PricingOracle is IPricingEngine {
         uint256 minDuration;
         uint256 maxDuration;
         uint256 basePremiumBps;
-        uint256 maxCoverage;
+        uint256 maxNotional;
         uint256 downsideRiskBps;
         uint256 upsideRiskBps;
+        uint16 minTriggerBps;
+        uint16 maxTriggerBps;
         uint16 openMinutesUtc;
         uint16 closeMinutesUtc;
         bool enforceMarketHours;
@@ -49,15 +53,17 @@ contract PricingOracle is IPricingEngine {
         address indexed spotFeed,
         address indexed volFeed,
         uint256 basePremiumBps,
-        uint256 maxCoverage
+        uint256 maxNotional
     );
 
     error NotOwner();
     error InvalidAddress();
     error MarketInactive(bytes32 symbol);
     error InvalidDuration();
-    error CoverageTooLarge();
+    error NotionalTooLarge();
     error InvalidUtilization();
+    error InvalidTrigger();
+    error InvalidPayoutTerms();
     error MarketClosed(bytes32 symbol);
     error InvalidOracleAnswer();
 
@@ -84,6 +90,9 @@ contract PricingOracle is IPricingEngine {
         if (config.openMinutesUtc >= DAY / 1 minutes || config.closeMinutesUtc >= DAY / 1 minutes) {
             revert InvalidDuration();
         }
+        if (config.minTriggerBps < 500 || config.maxTriggerBps > 2_000 || config.maxTriggerBps < config.minTriggerBps) {
+            revert InvalidTrigger();
+        }
 
         MarketConfig storage market = marketConfigs[symbol];
         market.spotFeed = config.spotFeed;
@@ -91,9 +100,11 @@ contract PricingOracle is IPricingEngine {
         market.minDuration = config.minDuration;
         market.maxDuration = config.maxDuration;
         market.basePremiumBps = config.basePremiumBps;
-        market.maxCoverage = config.maxCoverage;
+        market.maxNotional = config.maxNotional;
         market.downsideRiskBps = config.downsideRiskBps;
         market.upsideRiskBps = config.upsideRiskBps;
+        market.minTriggerBps = config.minTriggerBps;
+        market.maxTriggerBps = config.maxTriggerBps;
         market.openMinutesUtc = config.openMinutesUtc;
         market.closeMinutesUtc = config.closeMinutesUtc;
         market.enforceMarketHours = config.enforceMarketHours;
@@ -104,38 +115,59 @@ contract PricingOracle is IPricingEngine {
             config.spotFeed,
             config.volFeed,
             config.basePremiumBps,
-            config.maxCoverage
+            config.maxNotional
         );
     }
 
     function quotePremium(
         bytes32 symbol,
-        uint256 coverageAmount,
+        uint256 notional,
         uint256 duration,
+        uint16 triggerBps,
+        uint256 deductible,
+        uint256 payoutCap,
         uint256 utilizationBpsValue,
         bool isDownsideProtection
     ) external view returns (PremiumQuote memory quote) {
         MarketConfig storage config = marketConfigs[symbol];
         if (!config.isActive) revert MarketInactive(symbol);
         if (duration < config.minDuration || duration > config.maxDuration) revert InvalidDuration();
-        if (coverageAmount == 0 || coverageAmount > config.maxCoverage) revert CoverageTooLarge();
+        if (notional == 0 || notional > config.maxNotional) revert NotionalTooLarge();
         if (utilizationBpsValue > BPS) revert InvalidUtilization();
+        if (triggerBps < config.minTriggerBps || triggerBps > config.maxTriggerBps) revert InvalidTrigger();
+        if (payoutCap == 0 || payoutCap > notional || deductible >= payoutCap) revert InvalidPayoutTerms();
         if (!_isMarketOpen(config)) revert MarketClosed(symbol);
 
         uint256 spotPrice = _readNormalizedFeed(config.spotFeed);
         uint256 annualVolBps = _readNormalizedFeed(config.volFeed);
         uint256 riskBps = isDownsideProtection ? config.downsideRiskBps : config.upsideRiskBps;
         uint256 surchargeBps = _utilizationSurcharge(utilizationBpsValue);
-
-        uint256 timeScaledRiskBps = (annualVolBps * duration) / YEAR;
-        uint256 totalRateBps = config.basePremiumBps + timeScaledRiskBps + riskBps + surchargeBps;
-        uint256 premium = (coverageAmount * totalRateBps) / BPS;
+        uint256 strikePrice = isDownsideProtection
+            ? (spotPrice * (BPS - triggerBps)) / BPS
+            : (spotPrice * (BPS + triggerBps)) / BPS;
+        uint256 estimatedProbabilityBps = _estimateProbabilityBps(annualVolBps, duration, triggerBps, riskBps);
+        uint256 moveMagnitudeBps = triggerBps + (annualVolBps * duration) / YEAR;
+        uint256 totalRateBps =
+            config.basePremiumBps +
+            riskBps +
+            surchargeBps +
+            (estimatedProbabilityBps / 12) +
+            (moveMagnitudeBps / 8) +
+            ((payoutCap * 1_000) / notional);
+        uint256 premium = (notional * totalRateBps) / BPS;
 
         quote = PremiumQuote({
             premium: premium,
             spotPrice: spotPrice,
+            strikePrice: strikePrice,
+            notional: notional,
+            deductible: deductible,
+            payoutCap: payoutCap,
             annualVolBps: annualVolBps,
+            estimatedProbabilityBps: estimatedProbabilityBps,
             utilizationSurchargeBps: surchargeBps,
+            triggerBps: triggerBps,
+            isDownsideProtection: isDownsideProtection,
             expiry: block.timestamp + duration
         });
     }
@@ -165,6 +197,25 @@ contract PricingOracle is IPricingEngine {
 
         uint256 excess = utilizationBpsValue - 7_000;
         return 350 + (excess * excess) / 900;
+    }
+
+    function _estimateProbabilityBps(
+        uint256 annualVolBps,
+        uint256 duration,
+        uint16 triggerBps,
+        uint256 directionalRiskBps
+    ) internal pure returns (uint256 probabilityBps) {
+        uint256 timeScaledVolBps = (annualVolBps * duration) / YEAR;
+        uint256 difficulty = uint256(triggerBps) + 250;
+        uint256 raw = ((timeScaledVolBps + directionalRiskBps + 300) * BPS) / difficulty;
+
+        if (raw < 300) {
+            return 300;
+        }
+        if (raw > 9_000) {
+            return 9_000;
+        }
+        probabilityBps = raw;
     }
 
     function _readNormalizedFeed(address feed) internal view returns (uint256 value) {

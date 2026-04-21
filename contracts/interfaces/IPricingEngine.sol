@@ -5,8 +5,15 @@ interface IPricingEngine {
     struct PremiumQuote {
         uint256 premium;
         uint256 spotPrice;
+        uint256 strikePrice;
+        uint256 notional;
+        uint256 deductible;
+        uint256 payoutCap;
         uint256 annualVolBps;
+        uint256 estimatedProbabilityBps;
         uint256 utilizationSurchargeBps;
+        uint16 triggerBps;
+        bool isDownsideProtection;
         uint256 expiry;
     }
 
@@ -18,8 +25,11 @@ interface IPricingEngine {
 
     function quotePremium(
         bytes32 symbol,
-        uint256 coverageAmount,
+        uint256 notional,
         uint256 duration,
+        uint16 triggerBps,
+        uint256 deductible,
+        uint256 payoutCap,
         uint256 utilizationBps,
         bool isDownsideProtection
     ) external view returns (PremiumQuote memory quote);

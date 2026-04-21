@@ -30,6 +30,27 @@ body {
   padding: 32px 0 48px;
 }
 
+.topnav {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.topnav a {
+  display: inline-block;
+  padding: 10px 16px;
+  border-radius: 999px;
+  text-decoration: none;
+  color: var(--text);
+  background: rgba(255, 251, 245, 0.75);
+  border: 1px solid var(--panel-border);
+}
+
+.topnav a.active {
+  background: linear-gradient(135deg, var(--accent), #de7c2d);
+  color: #fffaf6;
+}
+
 .hero,
 .card {
   backdrop-filter: blur(14px);

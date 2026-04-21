@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stock Insurance Scenario Simulator</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <nav class="topnav">
+      <a href="./index.html">Manual Test</a>
+      <a class="active" href="./simulation.html">Scenario Simulator</a>
+    </nav>
+
+    <section class="hero">
+      <p class="eyebrow">Historical Playback</p>
+      <h1>Rapidly simulate one or more policies against sample stock paths</h1>
+      <p class="lede">
+        This page does not send transactions. It mirrors the contract terms off-chain so you can quickly estimate trigger rates,
+        payouts, pool revenue, and underwriting performance across multiple policies.
+      </p>
+    </section>
+
+    <section class="grid">
+      <section class="card">
+        <h2>Add Simulated Policy</h2>
+        <label>Symbol
+          <select id="simSymbol">
+            <option value="AAPL">AAPL</option>
+            <option value="TSLA">TSLA</option>
+            <option value="NVDA">NVDA</option>
+            <option value="MSFT">MSFT</option>
+          </select>
+        </label>
+        <label>Direction
+          <select id="simDirection">
+            <option value="down">Downside Protection</option>
+            <option value="up">Upside Protection</option>
+          </select>
+        </label>
+        <label>Trigger
+          <select id="simTrigger">
+            <option value="500">5%</option>
+            <option value="1000" selected>10%</option>
+            <option value="1500">15%</option>
+            <option value="2000">20%</option>
+          </select>
+        </label>
+        <label>Notional (USDC) <input id="simNotional" type="number" min="0" step="0.01" value="1000" /></label>
+        <label>Deductible (USDC) <input id="simDeductible" type="number" min="0" step="0.01" value="0" /></label>
+        <label>Payout Cap (USDC) <input id="simPayoutCap" type="number" min="0" step="0.01" value="500" /></label>
+        <label>Duration (Trading Steps) <input id="simDuration" type="number" min="1" step="1" value="4" /></label>
+        <label>Entry Step <input id="simStartIndex" type="number" min="0" step="1" value="0" /></label>
+        <button id="addPolicyButton">Add Policy</button>
+        <button id="runSimulationButton">Run Simulation</button>
+      </section>
+
+      <section class="card">
+        <h2>Scenario Path</h2>
+        <pre id="scenarioOutput">Select or add a policy to inspect scenario data.</pre>
+      </section>
+    </section>
+
+    <section class="card">
+      <h2>Queued Policies</h2>
+      <pre id="policiesQueueOutput">No policies queued.</pre>
+    </section>
+
+    <section class="card">
+      <h2>Simulation Result</h2>
+      <pre id="simulationOutput">No simulation run yet.</pre>
+    </section>
+  </main>
+
+  <script type="module" src="./simulator.js"></script>
+</body>
+</html>

@@ -1,17 +1,26 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "../interfaces/IERC20.sol";
 import "../interfaces/IInsuranceVault.sol";
 
 contract InsuranceVault is IInsuranceVault {
     uint256 public constant BPS = 10_000;
+    uint256 public constant SHARE_PRICE_SCALE = 1e18;
+
+    IERC20 public immutable assetToken;
 
     address public owner;
     address public policyManager;
 
+    address public immutable override settlementAsset;
     uint256 public override totalAssets;
     uint256 public override totalReserved;
-    uint256 public totalShares;
+    uint256 public override totalShares;
+    uint256 public override realizedPremiums;
+    uint256 public override totalClaimsPaid;
+    uint256 public cumulativeDeposits;
+    uint256 public cumulativeWithdrawals;
 
     mapping(address => uint256) public shareBalance;
 
@@ -23,8 +32,8 @@ contract InsuranceVault is IInsuranceVault {
     event Withdrawn(address indexed provider, uint256 assets, uint256 sharesBurned);
     event LiquidityReserved(uint256 amount, uint256 totalReservedAfter);
     event LiquidityReleased(uint256 amount, uint256 totalReservedAfter);
-    event PremiumCollected(address indexed payer, uint256 amount);
-    event ClaimPaid(address indexed beneficiary, uint256 amount, uint256 totalReservedAfter);
+    event PremiumCollected(address indexed payer, uint256 amount, uint256 realizedPremiumsAfter);
+    event ClaimPaid(address indexed beneficiary, uint256 amount, uint256 totalReservedAfter, uint256 claimsPaidAfter);
 
     error NotOwner();
     error NotPolicyManager();
@@ -32,7 +41,7 @@ contract InsuranceVault is IInsuranceVault {
     error InvalidAmount();
     error InsufficientLiquidity();
     error Reentrancy();
-    error TransferFailed();
+    error TokenTransferFailed();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -51,14 +60,12 @@ contract InsuranceVault is IInsuranceVault {
         _lock = 0;
     }
 
-    constructor(address initialOwner) {
-        if (initialOwner == address(0)) revert InvalidAddress();
+    constructor(address initialOwner, address assetTokenAddress) {
+        if (initialOwner == address(0) || assetTokenAddress == address(0)) revert InvalidAddress();
+        assetToken = IERC20(assetTokenAddress);
+        settlementAsset = assetTokenAddress;
         owner = initialOwner;
         emit OwnershipTransferred(address(0), initialOwner);
-    }
-
-    receive() external payable {
-        collectPremium();
     }
 
     function transferOwnership(address newOwner) external onlyOwner {
@@ -73,24 +80,30 @@ contract InsuranceVault is IInsuranceVault {
         policyManager = newPolicyManager;
     }
 
-    function deposit() external payable nonReentrant returns (uint256 sharesMinted) {
-        if (msg.value == 0) revert InvalidAmount();
+    function deposit(uint256 assetAmount) external override nonReentrant returns (uint256 sharesMinted) {
+        if (assetAmount == 0) revert InvalidAmount();
 
         uint256 currentAssets = totalAssets;
         if (totalShares == 0 || currentAssets == 0) {
-            sharesMinted = msg.value;
+            sharesMinted = assetAmount;
         } else {
-            sharesMinted = (msg.value * totalShares) / currentAssets;
+            sharesMinted = (assetAmount * totalShares) / currentAssets;
+        }
+        if (sharesMinted == 0) revert InvalidAmount();
+
+        if (!assetToken.transferFrom(msg.sender, address(this), assetAmount)) {
+            revert TokenTransferFailed();
         }
 
-        totalAssets = currentAssets + msg.value;
+        totalAssets = currentAssets + assetAmount;
         totalShares += sharesMinted;
         shareBalance[msg.sender] += sharesMinted;
+        cumulativeDeposits += assetAmount;
 
-        emit Deposited(msg.sender, msg.value, sharesMinted);
+        emit Deposited(msg.sender, assetAmount, sharesMinted);
     }
 
-    function withdraw(uint256 shareAmount) external nonReentrant returns (uint256 assetsOut) {
+    function withdraw(uint256 shareAmount) external override nonReentrant returns (uint256 assetsOut) {
         if (shareAmount == 0) revert InvalidAmount();
         if (shareAmount > shareBalance[msg.sender]) revert InsufficientLiquidity();
 
@@ -100,9 +113,9 @@ contract InsuranceVault is IInsuranceVault {
         shareBalance[msg.sender] -= shareAmount;
         totalShares -= shareAmount;
         totalAssets -= assetsOut;
+        cumulativeWithdrawals += assetsOut;
 
-        (bool success, ) = payable(msg.sender).call{value: assetsOut}("");
-        if (!success) revert TransferFailed();
+        if (!assetToken.transfer(msg.sender, assetsOut)) revert TokenTransferFailed();
 
         emit Withdrawn(msg.sender, assetsOut, shareAmount);
     }
@@ -116,6 +129,17 @@ contract InsuranceVault is IInsuranceVault {
 
     function availableLiquidity() public view override returns (uint256) {
         return totalAssets - totalReserved;
+    }
+
+    function sharePrice() public view override returns (uint256) {
+        if (totalShares == 0) {
+            return SHARE_PRICE_SCALE;
+        }
+        return (totalAssets * SHARE_PRICE_SCALE) / totalShares;
+    }
+
+    function netUnderwritingResult() public view override returns (int256) {
+        return int256(realizedPremiums) - int256(totalClaimsPaid);
     }
 
     function reserveLiquidity(uint256 amount) external override onlyPolicyManager {
@@ -134,13 +158,18 @@ contract InsuranceVault is IInsuranceVault {
         emit LiquidityReleased(amount, totalReserved);
     }
 
-    function collectPremium() public payable override {
-        if (msg.value == 0) revert InvalidAmount();
-        totalAssets += msg.value;
-        emit PremiumCollected(msg.sender, msg.value);
+    function collectPremium(address payer, uint256 amount) external override onlyPolicyManager {
+        if (payer == address(0)) revert InvalidAddress();
+        if (amount == 0) revert InvalidAmount();
+
+        if (!assetToken.transferFrom(payer, address(this), amount)) revert TokenTransferFailed();
+
+        totalAssets += amount;
+        realizedPremiums += amount;
+        emit PremiumCollected(payer, amount, realizedPremiums);
     }
 
-    function payClaim(address payable beneficiary, uint256 amount)
+    function payClaim(address beneficiary, uint256 amount)
         external
         override
         onlyPolicyManager
@@ -152,10 +181,10 @@ contract InsuranceVault is IInsuranceVault {
 
         totalReserved -= amount;
         totalAssets -= amount;
+        totalClaimsPaid += amount;
 
-        (bool success, ) = beneficiary.call{value: amount}("");
-        if (!success) revert TransferFailed();
+        if (!assetToken.transfer(beneficiary, amount)) revert TokenTransferFailed();
 
-        emit ClaimPaid(beneficiary, amount, totalReserved);
+        emit ClaimPaid(beneficiary, amount, totalReserved, totalClaimsPaid);
     }
 }

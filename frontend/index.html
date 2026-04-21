@@ -8,12 +8,16 @@
 </head>
 <body>
   <main class="shell">
+    <nav class="topnav">
+      <a class="active" href="./index.html">Manual Test</a>
+      <a href="./simulation.html">Scenario Simulator</a>
+    </nav>
     <section class="hero">
       <p class="eyebrow">US Stock Insurance MVP</p>
-      <h1>Simple front-end for testing AAPL hedge policies</h1>
+      <h1>Manual chain-connected test page for U.S. stock insurance</h1>
       <p class="lede">
-        Connect a wallet, point to your deployed demo contracts, quote a policy, buy coverage, settle it after expiry,
-        and test LP deposit and withdrawal flows.
+        Connect a wallet, point to your deployed contracts, quote trigger-based insurance, buy coverage, cancel after
+        the lock delay, settle after expiry, and inspect LP accounting.
       </p>
       <button id="connectButton">Connect Wallet</button>
       <p id="walletStatus" class="muted">Wallet not connected.</p>
@@ -25,14 +29,21 @@
       <label>Insurance Vault <input id="vaultAddress" placeholder="0x..." /></label>
       <label>Pricing Oracle <input id="oracleAddress" placeholder="0x..." /></label>
       <button id="saveAddressesButton">Load Contracts</button>
-      <p class="muted">If you use `StockHedgeDemoDeployer`, copy the three child contract addresses into these fields.</p>
+      <p class="muted">The vault now uses MockUSDC settlement. If `frontend/deployments/localhost.json` exists, the page will try to preload local addresses.</p>
     </section>
 
     <section class="grid">
       <section class="card">
         <h2>Quote & Buy Policy</h2>
-        <label>Ticker <input id="symbolInput" value="AAPL" maxlength="10" /></label>
-        <label>Coverage (ETH) <input id="coverageInput" type="number" min="0" step="0.01" value="1" /></label>
+        <label>Ticker
+          <select id="symbolInput">
+            <option value="AAPL">AAPL</option>
+            <option value="TSLA">TSLA</option>
+            <option value="NVDA">NVDA</option>
+            <option value="MSFT">MSFT</option>
+          </select>
+        </label>
+        <label>Notional (USDC) <input id="notionalInput" type="number" min="0" step="0.01" value="1000" /></label>
         <label>Duration (hours) <input id="durationInput" type="number" min="1" step="1" value="24" /></label>
         <label>Direction
           <select id="directionInput">
@@ -40,24 +51,36 @@
             <option value="up">Upside Protection</option>
           </select>
         </label>
+        <label>Trigger Percent
+          <select id="triggerInput">
+            <option value="500">5%</option>
+            <option value="1000" selected>10%</option>
+            <option value="1500">15%</option>
+            <option value="2000">20%</option>
+          </select>
+        </label>
+        <label>Deductible (USDC) <input id="deductibleInput" type="number" min="0" step="0.01" value="0" /></label>
+        <label>Payout Cap (USDC) <input id="payoutCapInput" type="number" min="0" step="0.01" value="500" /></label>
         <button id="quoteButton">Get Quote</button>
         <button id="buyButton">Buy Policy</button>
         <pre id="quoteOutput">No quote loaded.</pre>
       </section>
 
       <section class="card">
-        <h2>Settle Policy</h2>
+        <h2>Policy Actions</h2>
         <label>Policy ID <input id="settlePolicyIdInput" type="number" min="1" step="1" /></label>
         <button id="settleButton">Settle</button>
+        <label>Cancel Policy ID <input id="cancelPolicyIdInput" type="number" min="1" step="1" /></label>
+        <button id="cancelButton">Cancel</button>
         <button id="loadPoliciesButton">Load My Policies</button>
         <pre id="policiesOutput">No policies loaded.</pre>
       </section>
 
       <section class="card">
         <h2>LP Vault</h2>
-        <label>Deposit (ETH) <input id="depositInput" type="number" min="0" step="0.01" value="1" /></label>
+        <label>Deposit (USDC) <input id="depositInput" type="number" min="0" step="0.01" value="1000" /></label>
         <button id="depositButton">Deposit Liquidity</button>
-        <label>Withdraw Shares <input id="withdrawInput" type="number" min="0" step="0.01" value="0.5" /></label>
+        <label>Withdraw Shares <input id="withdrawInput" type="number" min="0" step="0.01" value="1000" /></label>
         <button id="withdrawButton">Withdraw</button>
         <button id="vaultStateButton">Refresh Vault</button>
         <pre id="vaultOutput">Vault state unavailable.</pre>
