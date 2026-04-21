@@ -27,21 +27,22 @@ contract StockHedgeDemoDeployer {
         insuranceVault = new InsuranceVault(address(this));
         policyFactory = new PolicyFactory(finalOwner, address(insuranceVault), address(pricingOracle));
 
-        pricingOracle.configureMarket(
-            AAPL,
-            address(aaplSpotFeed),
-            address(aaplVolFeed),
-            1 hours,
-            30 days,
-            150,
-            50 ether,
-            120,
-            90,
-            570,
-            960,
-            false,
-            true
-        );
+        PricingOracle.MarketConfigInput memory marketConfig = PricingOracle.MarketConfigInput({
+            spotFeed: address(aaplSpotFeed),
+            volFeed: address(aaplVolFeed),
+            minDuration: 1 hours,
+            maxDuration: 30 days,
+            basePremiumBps: 150,
+            maxCoverage: 50 ether,
+            downsideRiskBps: 120,
+            upsideRiskBps: 90,
+            openMinutesUtc: 570,
+            closeMinutesUtc: 960,
+            enforceMarketHours: false,
+            isActive: true
+        });
+
+        pricingOracle.configureMarket(AAPL, marketConfig);
 
         insuranceVault.setPolicyManager(address(policyFactory));
         pricingOracle.transferOwnership(finalOwner);

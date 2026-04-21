@@ -26,6 +26,21 @@ contract PricingOracle is IPricingEngine {
         bool isActive;
     }
 
+    struct MarketConfigInput {
+        address spotFeed;
+        address volFeed;
+        uint256 minDuration;
+        uint256 maxDuration;
+        uint256 basePremiumBps;
+        uint256 maxCoverage;
+        uint256 downsideRiskBps;
+        uint256 upsideRiskBps;
+        uint16 openMinutesUtc;
+        uint16 closeMinutesUtc;
+        bool enforceMarketHours;
+        bool isActive;
+    }
+
     mapping(bytes32 => MarketConfig) private marketConfigs;
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -63,41 +78,34 @@ contract PricingOracle is IPricingEngine {
         owner = newOwner;
     }
 
-    function configureMarket(
-        bytes32 symbol,
-        address spotFeed,
-        address volFeed,
-        uint256 minDuration,
-        uint256 maxDuration,
-        uint256 basePremiumBps,
-        uint256 maxCoverage,
-        uint256 downsideRiskBps,
-        uint256 upsideRiskBps,
-        uint16 openMinutesUtc,
-        uint16 closeMinutesUtc,
-        bool enforceMarketHours,
-        bool isActive
-    ) external onlyOwner {
-        if (spotFeed == address(0) || volFeed == address(0)) revert InvalidAddress();
-        if (minDuration == 0 || maxDuration < minDuration) revert InvalidDuration();
-        if (openMinutesUtc >= DAY / 1 minutes || closeMinutesUtc >= DAY / 1 minutes) revert InvalidDuration();
+    function configureMarket(bytes32 symbol, MarketConfigInput calldata config) external onlyOwner {
+        if (config.spotFeed == address(0) || config.volFeed == address(0)) revert InvalidAddress();
+        if (config.minDuration == 0 || config.maxDuration < config.minDuration) revert InvalidDuration();
+        if (config.openMinutesUtc >= DAY / 1 minutes || config.closeMinutesUtc >= DAY / 1 minutes) {
+            revert InvalidDuration();
+        }
 
-        marketConfigs[symbol] = MarketConfig({
-            spotFeed: spotFeed,
-            volFeed: volFeed,
-            minDuration: minDuration,
-            maxDuration: maxDuration,
-            basePremiumBps: basePremiumBps,
-            maxCoverage: maxCoverage,
-            downsideRiskBps: downsideRiskBps,
-            upsideRiskBps: upsideRiskBps,
-            openMinutesUtc: openMinutesUtc,
-            closeMinutesUtc: closeMinutesUtc,
-            enforceMarketHours: enforceMarketHours,
-            isActive: isActive
-        });
+        MarketConfig storage market = marketConfigs[symbol];
+        market.spotFeed = config.spotFeed;
+        market.volFeed = config.volFeed;
+        market.minDuration = config.minDuration;
+        market.maxDuration = config.maxDuration;
+        market.basePremiumBps = config.basePremiumBps;
+        market.maxCoverage = config.maxCoverage;
+        market.downsideRiskBps = config.downsideRiskBps;
+        market.upsideRiskBps = config.upsideRiskBps;
+        market.openMinutesUtc = config.openMinutesUtc;
+        market.closeMinutesUtc = config.closeMinutesUtc;
+        market.enforceMarketHours = config.enforceMarketHours;
+        market.isActive = config.isActive;
 
-        emit MarketConfigured(symbol, spotFeed, volFeed, basePremiumBps, maxCoverage);
+        emit MarketConfigured(
+            symbol,
+            config.spotFeed,
+            config.volFeed,
+            config.basePremiumBps,
+            config.maxCoverage
+        );
     }
 
     function quotePremium(
@@ -107,7 +115,7 @@ contract PricingOracle is IPricingEngine {
         uint256 utilizationBpsValue,
         bool isDownsideProtection
     ) external view returns (PremiumQuote memory quote) {
-        MarketConfig memory config = marketConfigs[symbol];
+        MarketConfig storage config = marketConfigs[symbol];
         if (!config.isActive) revert MarketInactive(symbol);
         if (duration < config.minDuration || duration > config.maxDuration) revert InvalidDuration();
         if (coverageAmount == 0 || coverageAmount > config.maxCoverage) revert CoverageTooLarge();
@@ -133,13 +141,13 @@ contract PricingOracle is IPricingEngine {
     }
 
     function getSpotPrice(bytes32 symbol) external view returns (uint256) {
-        MarketConfig memory config = marketConfigs[symbol];
+        MarketConfig storage config = marketConfigs[symbol];
         if (!config.isActive) revert MarketInactive(symbol);
         return _readNormalizedFeed(config.spotFeed);
     }
 
     function isMarketOpen(bytes32 symbol) external view returns (bool) {
-        MarketConfig memory config = marketConfigs[symbol];
+        MarketConfig storage config = marketConfigs[symbol];
         if (!config.isActive) {
             return false;
         }
@@ -148,10 +156,6 @@ contract PricingOracle is IPricingEngine {
 
     function isSupportedSymbol(bytes32 symbol) external view returns (bool) {
         return marketConfigs[symbol].isActive;
-    }
-
-    function getMarketConfig(bytes32 symbol) external view returns (MarketConfig memory) {
-        return marketConfigs[symbol];
     }
 
     function _utilizationSurcharge(uint256 utilizationBpsValue) internal pure returns (uint256) {
@@ -177,7 +181,7 @@ contract PricingOracle is IPricingEngine {
         }
     }
 
-    function _isMarketOpen(MarketConfig memory config) internal view returns (bool) {
+    function _isMarketOpen(MarketConfig storage config) internal view returns (bool) {
         if (!config.enforceMarketHours) {
             return true;
         }
