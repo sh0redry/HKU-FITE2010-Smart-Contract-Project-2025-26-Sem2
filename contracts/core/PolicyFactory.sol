@@ -7,6 +7,14 @@ import "../interfaces/IPricingEngine.sol";
 contract PolicyFactory {
     uint256 public constant BPS = 10_000;
     uint256 public constant MIN_CANCEL_DELAY = 30 minutes;
+    uint256 public constant SHORT_TERM_MAX = 7 days;
+    uint256 public constant MEDIUM_TERM_MAX = 21 days;
+
+    enum TermBucket {
+        Short,
+        Medium,
+        Long
+    }
 
     enum PolicyStatus {
         Active,
@@ -38,6 +46,15 @@ contract PolicyFactory {
     address public owner;
     IInsuranceVault public immutable vault;
     IPricingEngine public immutable pricingEngine;
+    bool public underwritingPaused;
+    uint256 public maxUtilizationBps = 9_000;
+    uint256 public emergencyPauseUtilizationBps = 9_500;
+    uint256 public minimumLiquidityBuffer = 0;
+    uint256 public maxDownsideExposure = type(uint256).max;
+    uint256 public maxUpsideExposure = type(uint256).max;
+    uint256 public maxShortTermExposure = type(uint256).max;
+    uint256 public maxMediumTermExposure = type(uint256).max;
+    uint256 public maxLongTermExposure = type(uint256).max;
 
     uint256 public nextPolicyId = 1;
 
@@ -45,8 +62,27 @@ contract PolicyFactory {
     mapping(address => uint256[]) public policyIdsByHolder;
     uint256[] private activePolicyIds;
     mapping(uint256 => uint256) private activePolicyIndex;
+    mapping(bytes32 => uint256) public symbolExposure;
+    mapping(bytes32 => uint256) public symbolExposureLimit;
+    uint256 public downsideExposure;
+    uint256 public upsideExposure;
+    uint256 public shortTermExposure;
+    uint256 public mediumTermExposure;
+    uint256 public longTermExposure;
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    event UnderwritingPauseUpdated(bool isPaused, bytes32 indexed reason);
+    event RiskLimitsUpdated(
+        uint256 maxUtilizationBps,
+        uint256 emergencyPauseUtilizationBps,
+        uint256 minimumLiquidityBuffer,
+        uint256 maxDownsideExposure,
+        uint256 maxUpsideExposure,
+        uint256 maxShortTermExposure,
+        uint256 maxMediumTermExposure,
+        uint256 maxLongTermExposure
+    );
+    event SymbolExposureLimitUpdated(bytes32 indexed symbol, uint256 newLimit);
     event PolicyPurchased(
         uint256 indexed policyId,
         address indexed holder,
@@ -78,6 +114,12 @@ contract PolicyFactory {
     error PolicyExpired();
     error CancellationLocked();
     error NotPolicyHolder();
+    error UnderwritingPaused(bytes32 reason);
+    error SymbolExposureLimitExceeded(bytes32 symbol);
+    error DirectionExposureLimitExceeded(bool isDownsideProtection);
+    error TermBucketExposureLimitExceeded(TermBucket bucket);
+    error UtilizationRiskExceeded();
+    error SolvencyCheckFailed();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -102,6 +144,53 @@ contract PolicyFactory {
         owner = newOwner;
     }
 
+    function setUnderwritingPaused(bool paused, bytes32 reason) external onlyOwner {
+        underwritingPaused = paused;
+        emit UnderwritingPauseUpdated(paused, reason);
+    }
+
+    function configureRiskLimits(
+        uint256 maxUtilizationBps_,
+        uint256 emergencyPauseUtilizationBps_,
+        uint256 minimumLiquidityBuffer_,
+        uint256 maxDownsideExposure_,
+        uint256 maxUpsideExposure_,
+        uint256 maxShortTermExposure_,
+        uint256 maxMediumTermExposure_,
+        uint256 maxLongTermExposure_
+    ) external onlyOwner {
+        if (
+            maxUtilizationBps_ > BPS ||
+            emergencyPauseUtilizationBps_ > BPS ||
+            emergencyPauseUtilizationBps_ > maxUtilizationBps_
+        ) revert InvalidAmount();
+
+        maxUtilizationBps = maxUtilizationBps_;
+        emergencyPauseUtilizationBps = emergencyPauseUtilizationBps_;
+        minimumLiquidityBuffer = minimumLiquidityBuffer_;
+        maxDownsideExposure = maxDownsideExposure_;
+        maxUpsideExposure = maxUpsideExposure_;
+        maxShortTermExposure = maxShortTermExposure_;
+        maxMediumTermExposure = maxMediumTermExposure_;
+        maxLongTermExposure = maxLongTermExposure_;
+
+        emit RiskLimitsUpdated(
+            maxUtilizationBps_,
+            emergencyPauseUtilizationBps_,
+            minimumLiquidityBuffer_,
+            maxDownsideExposure_,
+            maxUpsideExposure_,
+            maxShortTermExposure_,
+            maxMediumTermExposure_,
+            maxLongTermExposure_
+        );
+    }
+
+    function setSymbolExposureLimit(bytes32 symbol, uint256 newLimit) external onlyOwner {
+        symbolExposureLimit[symbol] = newLimit;
+        emit SymbolExposureLimitUpdated(symbol, newLimit);
+    }
+
     function purchasePolicy(
         bytes32 symbol,
         bool isDownsideProtection,
@@ -112,6 +201,7 @@ contract PolicyFactory {
         uint256 payoutCap
     ) external returns (uint256 policyId) {
         if (notional == 0 || payoutCap == 0) revert InvalidAmount();
+        if (underwritingPaused) revert UnderwritingPaused(bytes32("MANUAL_PAUSE"));
         if (!pricingEngine.isSupportedSymbol(symbol)) revert UnsupportedSymbol(symbol);
 
         IPricingEngine.PremiumQuote memory quote = pricingEngine.quotePremium(
@@ -124,6 +214,7 @@ contract PolicyFactory {
             vault.utilizationBps(),
             isDownsideProtection
         );
+        _enforceRiskChecks(symbol, isDownsideProtection, duration, quote);
 
         vault.reserveLiquidity(quote.payoutCap);
         vault.collectPremium(msg.sender, quote.premium);
@@ -152,6 +243,7 @@ contract PolicyFactory {
         policyIdsByHolder[msg.sender].push(policyId);
         activePolicyIndex[policyId] = activePolicyIds.length;
         activePolicyIds.push(policyId);
+        _increaseExposure(symbol, isDownsideProtection, duration, quote.payoutCap);
 
         emit PolicyPurchased(
             policyId,
@@ -200,6 +292,7 @@ contract PolicyFactory {
         if (releasedLiquidity > 0) {
             vault.releaseLiquidity(releasedLiquidity);
         }
+        _decreaseExposure(policy.symbol, policy.isDownsideProtection, policy.expiry - policy.createdAt, policy.reservedLiquidity);
         _removeActivePolicy(policyId);
 
         emit PolicySettled(policyId, exitPrice, payout, releasedLiquidity);
@@ -216,6 +309,7 @@ contract PolicyFactory {
         policy.settledAt = block.timestamp;
 
         vault.releaseLiquidity(policy.reservedLiquidity);
+        _decreaseExposure(policy.symbol, policy.isDownsideProtection, policy.expiry - policy.createdAt, policy.reservedLiquidity);
         _removeActivePolicy(policyId);
         emit PolicyCancelled(policyId, msg.sender, policy.reservedLiquidity, block.timestamp);
     }
@@ -322,5 +416,107 @@ contract PolicyFactory {
 
         activePolicyIds.pop();
         delete activePolicyIndex[policyId];
+    }
+
+    function _enforceRiskChecks(
+        bytes32 symbol,
+        bool isDownsideProtection,
+        uint256 duration,
+        IPricingEngine.PremiumQuote memory quote
+    ) internal {
+        if (quote.oracleUsedFallback) {
+            underwritingPaused = true;
+            emit UnderwritingPauseUpdated(true, bytes32("ORACLE_FALLBACK"));
+            revert UnderwritingPaused(bytes32("ORACLE_FALLBACK"));
+        }
+
+        uint256 currentUtilization = vault.utilizationBps();
+        if (currentUtilization >= emergencyPauseUtilizationBps) {
+            underwritingPaused = true;
+            emit UnderwritingPauseUpdated(true, bytes32("UTILIZATION"));
+            revert UnderwritingPaused(bytes32("UTILIZATION"));
+        }
+
+        uint256 projectedAssets = vault.totalAssets() + quote.premium;
+        uint256 projectedReserved = vault.totalReserved() + quote.payoutCap;
+        uint256 projectedAvailable = projectedAssets - projectedReserved;
+        if (projectedAvailable < minimumLiquidityBuffer) revert SolvencyCheckFailed();
+        if (projectedAssets == 0 || (projectedReserved * BPS) / projectedAssets > maxUtilizationBps) {
+            revert UtilizationRiskExceeded();
+        }
+
+        uint256 symbolLimit = symbolExposureLimit[symbol];
+        if (symbolLimit != 0 && symbolExposure[symbol] + quote.payoutCap > symbolLimit) {
+            revert SymbolExposureLimitExceeded(symbol);
+        }
+
+        if (isDownsideProtection) {
+            if (downsideExposure + quote.payoutCap > maxDownsideExposure) {
+                revert DirectionExposureLimitExceeded(true);
+            }
+        } else if (upsideExposure + quote.payoutCap > maxUpsideExposure) {
+            revert DirectionExposureLimitExceeded(false);
+        }
+
+        TermBucket bucket = _termBucket(duration);
+        if (bucket == TermBucket.Short && shortTermExposure + quote.payoutCap > maxShortTermExposure) {
+            revert TermBucketExposureLimitExceeded(bucket);
+        }
+        if (bucket == TermBucket.Medium && mediumTermExposure + quote.payoutCap > maxMediumTermExposure) {
+            revert TermBucketExposureLimitExceeded(bucket);
+        }
+        if (bucket == TermBucket.Long && longTermExposure + quote.payoutCap > maxLongTermExposure) {
+            revert TermBucketExposureLimitExceeded(bucket);
+        }
+
+        if (quote.payoutCap > vault.availableLiquidity()) revert SolvencyCheckFailed();
+    }
+
+    function _increaseExposure(bytes32 symbol, bool isDownsideProtection, uint256 duration, uint256 amount) internal {
+        symbolExposure[symbol] += amount;
+
+        if (isDownsideProtection) {
+            downsideExposure += amount;
+        } else {
+            upsideExposure += amount;
+        }
+
+        TermBucket bucket = _termBucket(duration);
+        if (bucket == TermBucket.Short) {
+            shortTermExposure += amount;
+        } else if (bucket == TermBucket.Medium) {
+            mediumTermExposure += amount;
+        } else {
+            longTermExposure += amount;
+        }
+    }
+
+    function _decreaseExposure(bytes32 symbol, bool isDownsideProtection, uint256 duration, uint256 amount) internal {
+        symbolExposure[symbol] -= amount;
+
+        if (isDownsideProtection) {
+            downsideExposure -= amount;
+        } else {
+            upsideExposure -= amount;
+        }
+
+        TermBucket bucket = _termBucket(duration);
+        if (bucket == TermBucket.Short) {
+            shortTermExposure -= amount;
+        } else if (bucket == TermBucket.Medium) {
+            mediumTermExposure -= amount;
+        } else {
+            longTermExposure -= amount;
+        }
+    }
+
+    function _termBucket(uint256 duration) internal pure returns (TermBucket bucket) {
+        if (duration <= SHORT_TERM_MAX) {
+            return TermBucket.Short;
+        }
+        if (duration <= MEDIUM_TERM_MAX) {
+            return TermBucket.Medium;
+        }
+        bucket = TermBucket.Long;
     }
 }

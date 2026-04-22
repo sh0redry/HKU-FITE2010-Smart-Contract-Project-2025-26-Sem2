@@ -213,6 +213,16 @@ describe("Phase 6 Oracle Automation Lifecycle", function () {
       })
     );
     await insuranceVault.setPolicyManager(await policyFactory.getAddress());
+    await policyFactory.configureRiskLimits(
+      9000,
+      8500,
+      0,
+      ethers.parseUnits("1000000", USDC_DECIMALS),
+      ethers.parseUnits("1000000", USDC_DECIMALS),
+      ethers.parseUnits("1000000", USDC_DECIMALS),
+      ethers.parseUnits("1000000", USDC_DECIMALS),
+      ethers.parseUnits("1000000", USDC_DECIMALS)
+    );
     await mockUsdc.mint(lp.address, ethers.parseUnits("250000", USDC_DECIMALS));
     await mockUsdc.mint(buyer.address, ethers.parseUnits("50000", USDC_DECIMALS));
 
@@ -822,6 +832,188 @@ describe("Phase 6 Oracle Automation Lifecycle", function () {
     const settledPolicy = await policyFactory.getPolicy(1);
     expect(settledPolicy.status).to.equal(1);
     expect(await policyFactory.getActivePoliciesCount()).to.equal(0);
+  });
+
+  it("enforces per-symbol exposure caps", async function () {
+    const { owner, lp, buyer, mockUsdc, insuranceVault, policyFactory } = await loadFixture(deployFixture);
+    const lpDeposit = ethers.parseUnits("10000", USDC_DECIMALS);
+    const notional = ethers.parseUnits("1000", USDC_DECIMALS);
+    const payoutCap = ethers.parseUnits("600", USDC_DECIMALS);
+
+    await approveAndDeposit(mockUsdc, insuranceVault, lp, lpDeposit);
+    await policyFactory.connect(owner).setSymbolExposureLimit(AAPL, ethers.parseUnits("500", USDC_DECIMALS));
+
+    const quote = await policyFactory.previewPolicy(AAPL, true, notional, 24 * 3600, 1000, 0, payoutCap);
+    await mockUsdc.connect(buyer).approve(await insuranceVault.getAddress(), quote.premium);
+
+    await expect(
+      policyFactory.connect(buyer).purchasePolicy(AAPL, true, notional, 24 * 3600, 1000, 0, payoutCap)
+    ).to.be.revertedWithCustomError(policyFactory, "SymbolExposureLimitExceeded");
+  });
+
+  it("enforces downside and upside direction caps", async function () {
+    const { owner, lp, buyer, mockUsdc, insuranceVault, policyFactory } = await loadFixture(deployFixture);
+    const lpDeposit = ethers.parseUnits("10000", USDC_DECIMALS);
+    const notional = ethers.parseUnits("1000", USDC_DECIMALS);
+    const payoutCap = ethers.parseUnits("500", USDC_DECIMALS);
+
+    await approveAndDeposit(mockUsdc, insuranceVault, lp, lpDeposit);
+    await policyFactory.connect(owner).configureRiskLimits(
+      9000,
+      8500,
+      0,
+      ethers.parseUnits("400", USDC_DECIMALS),
+      ethers.parseUnits("1000000", USDC_DECIMALS),
+      ethers.parseUnits("1000000", USDC_DECIMALS),
+      ethers.parseUnits("1000000", USDC_DECIMALS),
+      ethers.parseUnits("1000000", USDC_DECIMALS)
+    );
+
+    const quote = await policyFactory.previewPolicy(AAPL, true, notional, 24 * 3600, 1000, 0, payoutCap);
+    await mockUsdc.connect(buyer).approve(await insuranceVault.getAddress(), quote.premium);
+
+    await expect(
+      policyFactory.connect(buyer).purchasePolicy(AAPL, true, notional, 24 * 3600, 1000, 0, payoutCap)
+    ).to.be.revertedWithCustomError(policyFactory, "DirectionExposureLimitExceeded");
+  });
+
+  it("enforces term bucket exposure caps", async function () {
+    const { owner, lp, buyer, mockUsdc, insuranceVault, policyFactory } = await loadFixture(deployFixture);
+    const lpDeposit = ethers.parseUnits("10000", USDC_DECIMALS);
+    const notional = ethers.parseUnits("1000", USDC_DECIMALS);
+    const payoutCap = ethers.parseUnits("500", USDC_DECIMALS);
+
+    await approveAndDeposit(mockUsdc, insuranceVault, lp, lpDeposit);
+    await policyFactory.connect(owner).configureRiskLimits(
+      9000,
+      8500,
+      0,
+      ethers.parseUnits("1000000", USDC_DECIMALS),
+      ethers.parseUnits("1000000", USDC_DECIMALS),
+      ethers.parseUnits("400", USDC_DECIMALS),
+      ethers.parseUnits("1000000", USDC_DECIMALS),
+      ethers.parseUnits("1000000", USDC_DECIMALS)
+    );
+
+    const quote = await policyFactory.previewPolicy(AAPL, true, notional, 24 * 3600, 1000, 0, payoutCap);
+    await mockUsdc.connect(buyer).approve(await insuranceVault.getAddress(), quote.premium);
+
+    await expect(
+      policyFactory.connect(buyer).purchasePolicy(AAPL, true, notional, 24 * 3600, 1000, 0, payoutCap)
+    ).to.be.revertedWithCustomError(policyFactory, "TermBucketExposureLimitExceeded");
+  });
+
+  it("supports manual underwriting pause", async function () {
+    const { owner, buyer, policyFactory } = await loadFixture(deployFixture);
+    await policyFactory.connect(owner).setUnderwritingPaused(true, ethers.encodeBytes32String("MANUAL"));
+
+    await expect(
+      policyFactory.connect(buyer).purchasePolicy(
+        AAPL,
+        true,
+        ethers.parseUnits("1000", USDC_DECIMALS),
+        24 * 3600,
+        1000,
+        0,
+        ethers.parseUnits("500", USDC_DECIMALS)
+      )
+    ).to.be.revertedWithCustomError(policyFactory, "UnderwritingPaused");
+  });
+
+  it("auto-pauses underwriting when utilization is already extreme", async function () {
+    const { owner, lp, buyer, mockUsdc, insuranceVault, policyFactory } = await loadFixture(deployFixture);
+    await policyFactory.connect(owner).configureRiskLimits(
+      9000,
+      6000,
+      0,
+      ethers.parseUnits("1000000", USDC_DECIMALS),
+      ethers.parseUnits("1000000", USDC_DECIMALS),
+      ethers.parseUnits("1000000", USDC_DECIMALS),
+      ethers.parseUnits("1000000", USDC_DECIMALS),
+      ethers.parseUnits("1000000", USDC_DECIMALS)
+    );
+
+    await approveAndDeposit(mockUsdc, insuranceVault, lp, ethers.parseUnits("10000", USDC_DECIMALS));
+    const largeQuote = await policyFactory.previewPolicy(
+      AAPL,
+      true,
+      ethers.parseUnits("10000", USDC_DECIMALS),
+      24 * 3600,
+      1000,
+      0,
+      ethers.parseUnits("8500", USDC_DECIMALS)
+    );
+    await mockUsdc.connect(buyer).approve(await insuranceVault.getAddress(), largeQuote.premium);
+    await policyFactory.connect(buyer).purchasePolicy(
+      AAPL,
+      true,
+      ethers.parseUnits("10000", USDC_DECIMALS),
+      24 * 3600,
+      1000,
+      0,
+      ethers.parseUnits("8500", USDC_DECIMALS)
+    );
+
+    const nextQuote = await policyFactory.previewPolicy(
+      AAPL,
+      true,
+      ethers.parseUnits("1000", USDC_DECIMALS),
+      24 * 3600,
+      1000,
+      0,
+      ethers.parseUnits("500", USDC_DECIMALS)
+    );
+    await mockUsdc.connect(buyer).approve(await insuranceVault.getAddress(), nextQuote.premium);
+
+    await expect(
+      policyFactory.connect(buyer).purchasePolicy(
+        AAPL,
+        true,
+        ethers.parseUnits("1000", USDC_DECIMALS),
+        24 * 3600,
+        1000,
+        0,
+        ethers.parseUnits("500", USDC_DECIMALS)
+      )
+    ).to.be.revertedWithCustomError(policyFactory, "UnderwritingPaused");
+  });
+
+  it("fails solvency checks when the post-trade liquidity buffer would be violated", async function () {
+    const { owner, lp, buyer, mockUsdc, insuranceVault, policyFactory } = await loadFixture(deployFixture);
+    await approveAndDeposit(mockUsdc, insuranceVault, lp, ethers.parseUnits("10000", USDC_DECIMALS));
+    await policyFactory.connect(owner).configureRiskLimits(
+      9000,
+      8500,
+      ethers.parseUnits("9800", USDC_DECIMALS),
+      ethers.parseUnits("1000000", USDC_DECIMALS),
+      ethers.parseUnits("1000000", USDC_DECIMALS),
+      ethers.parseUnits("1000000", USDC_DECIMALS),
+      ethers.parseUnits("1000000", USDC_DECIMALS),
+      ethers.parseUnits("1000000", USDC_DECIMALS)
+    );
+
+    const quote = await policyFactory.previewPolicy(
+      AAPL,
+      true,
+      ethers.parseUnits("1000", USDC_DECIMALS),
+      24 * 3600,
+      1000,
+      0,
+      ethers.parseUnits("500", USDC_DECIMALS)
+    );
+    await mockUsdc.connect(buyer).approve(await insuranceVault.getAddress(), quote.premium);
+
+    await expect(
+      policyFactory.connect(buyer).purchasePolicy(
+        AAPL,
+        true,
+        ethers.parseUnits("1000", USDC_DECIMALS),
+        24 * 3600,
+        1000,
+        0,
+        ethers.parseUnits("500", USDC_DECIMALS)
+      )
+    ).to.be.revertedWithCustomError(policyFactory, "SolvencyCheckFailed");
   });
 
   it("tracks underwriting metrics and LP share price after profit", async function () {
