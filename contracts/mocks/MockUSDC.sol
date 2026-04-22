@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "@openzeppelin/contracts/access/Ownable.sol";
+
 import "../interfaces/IERC20.sol";
 
-contract MockUSDC is IERC20 {
+contract MockUSDC is IERC20, Ownable {
     string public constant name = "Mock USD Coin";
     string public constant symbol = "mUSDC";
     uint8 public constant override decimals = 6;
 
-    address public owner;
     uint256 public override totalSupply;
 
     mapping(address => uint256) public override balanceOf;
@@ -16,28 +17,12 @@ contract MockUSDC is IERC20 {
 
     event Transfer(address indexed from, address indexed to, uint256 value);
     event Approval(address indexed owner, address indexed spender, uint256 value);
-    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
-
-    error NotOwner();
     error InvalidAddress();
     error InsufficientBalance();
     error InsufficientAllowance();
 
-    modifier onlyOwner() {
-        if (msg.sender != owner) revert NotOwner();
-        _;
-    }
-
-    constructor(address initialOwner) {
+    constructor(address initialOwner) Ownable(initialOwner) {
         if (initialOwner == address(0)) revert InvalidAddress();
-        owner = initialOwner;
-        emit OwnershipTransferred(address(0), initialOwner);
-    }
-
-    function transferOwnership(address newOwner) external onlyOwner {
-        if (newOwner == address(0)) revert InvalidAddress();
-        emit OwnershipTransferred(owner, newOwner);
-        owner = newOwner;
     }
 
     function mint(address to, uint256 amount) external onlyOwner {

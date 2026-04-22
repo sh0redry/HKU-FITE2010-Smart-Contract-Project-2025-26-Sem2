@@ -1,14 +1,21 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
+
 import "../interfaces/IInsuranceVault.sol";
 import "../interfaces/IPricingEngine.sol";
 
-contract PolicyFactory {
+contract PolicyFactory is AccessControl, Pausable {
     uint256 public constant BPS = 10_000;
     uint256 public constant MIN_CANCEL_DELAY = 30 minutes;
     uint256 public constant SHORT_TERM_MAX = 7 days;
     uint256 public constant MEDIUM_TERM_MAX = 21 days;
+
+    bytes32 public constant GOVERNOR_ROLE = keccak256("GOVERNOR_ROLE");
+    bytes32 public constant RISK_MANAGER_ROLE = keccak256("RISK_MANAGER_ROLE");
+    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
 
     enum TermBucket {
         Short,
@@ -43,20 +50,20 @@ contract PolicyFactory {
         PolicyStatus status;
     }
 
-    address public owner;
     IInsuranceVault public immutable vault;
     IPricingEngine public immutable pricingEngine;
+
+    uint256 public nextPolicyId = 1;
+
     bool public underwritingPaused;
     uint256 public maxUtilizationBps = 9_000;
-    uint256 public emergencyPauseUtilizationBps = 9_500;
+    uint256 public emergencyPauseUtilizationBps = 8_500;
     uint256 public minimumLiquidityBuffer = 0;
     uint256 public maxDownsideExposure = type(uint256).max;
     uint256 public maxUpsideExposure = type(uint256).max;
     uint256 public maxShortTermExposure = type(uint256).max;
     uint256 public maxMediumTermExposure = type(uint256).max;
     uint256 public maxLongTermExposure = type(uint256).max;
-
-    uint256 public nextPolicyId = 1;
 
     mapping(uint256 => Policy) private policies;
     mapping(address => uint256[]) public policyIdsByHolder;
@@ -70,7 +77,6 @@ contract PolicyFactory {
     uint256 public mediumTermExposure;
     uint256 public longTermExposure;
 
-    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event UnderwritingPauseUpdated(bool isPaused, bytes32 indexed reason);
     event RiskLimitsUpdated(
         uint256 maxUtilizationBps,
@@ -97,15 +103,9 @@ contract PolicyFactory {
         uint256 entryPrice,
         uint256 expiry
     );
-    event PolicySettled(
-        uint256 indexed policyId,
-        uint256 exitPrice,
-        uint256 payoutAmount,
-        uint256 releasedLiquidity
-    );
+    event PolicySettled(uint256 indexed policyId, uint256 exitPrice, uint256 payoutAmount, uint256 releasedLiquidity);
     event PolicyCancelled(uint256 indexed policyId, address indexed holder, uint256 releasedLiquidity, uint256 cancelledAt);
 
-    error NotOwner();
     error InvalidAddress();
     error InvalidAmount();
     error UnsupportedSymbol(bytes32 symbol);
@@ -121,31 +121,39 @@ contract PolicyFactory {
     error UtilizationRiskExceeded();
     error SolvencyCheckFailed();
 
-    modifier onlyOwner() {
-        if (msg.sender != owner) revert NotOwner();
-        _;
-    }
-
-    constructor(address initialOwner, address vaultAddress, address pricingEngineAddress) {
-        if (initialOwner == address(0) || vaultAddress == address(0) || pricingEngineAddress == address(0)) {
+    constructor(address governor, address vaultAddress, address pricingEngineAddress) {
+        if (governor == address(0) || vaultAddress == address(0) || pricingEngineAddress == address(0)) {
             revert InvalidAddress();
         }
 
-        owner = initialOwner;
         vault = IInsuranceVault(vaultAddress);
         pricingEngine = IPricingEngine(pricingEngineAddress);
 
-        emit OwnershipTransferred(address(0), initialOwner);
+        _grantRole(DEFAULT_ADMIN_ROLE, governor);
+        _grantRole(GOVERNOR_ROLE, governor);
+        _grantRole(RISK_MANAGER_ROLE, governor);
+        _grantRole(PAUSER_ROLE, governor);
     }
 
-    function transferOwnership(address newOwner) external onlyOwner {
-        if (newOwner == address(0)) revert InvalidAddress();
-        emit OwnershipTransferred(owner, newOwner);
-        owner = newOwner;
+    function pauseUnderwriting(bytes32 reason) external onlyRole(PAUSER_ROLE) {
+        underwritingPaused = true;
+        _pause();
+        emit UnderwritingPauseUpdated(true, reason);
     }
 
-    function setUnderwritingPaused(bool paused, bytes32 reason) external onlyOwner {
+    function unpauseUnderwriting() external onlyRole(GOVERNOR_ROLE) {
+        underwritingPaused = false;
+        _unpause();
+        emit UnderwritingPauseUpdated(false, bytes32("UNPAUSED"));
+    }
+
+    function setUnderwritingPaused(bool paused, bytes32 reason) external onlyRole(PAUSER_ROLE) {
         underwritingPaused = paused;
+        if (paused) {
+            _pause();
+        } else {
+            _unpause();
+        }
         emit UnderwritingPauseUpdated(paused, reason);
     }
 
@@ -158,7 +166,7 @@ contract PolicyFactory {
         uint256 maxShortTermExposure_,
         uint256 maxMediumTermExposure_,
         uint256 maxLongTermExposure_
-    ) external onlyOwner {
+    ) external onlyRole(RISK_MANAGER_ROLE) {
         if (
             maxUtilizationBps_ > BPS ||
             emergencyPauseUtilizationBps_ > BPS ||
@@ -186,7 +194,7 @@ contract PolicyFactory {
         );
     }
 
-    function setSymbolExposureLimit(bytes32 symbol, uint256 newLimit) external onlyOwner {
+    function setSymbolExposureLimit(bytes32 symbol, uint256 newLimit) external onlyRole(RISK_MANAGER_ROLE) {
         symbolExposureLimit[symbol] = newLimit;
         emit SymbolExposureLimitUpdated(symbol, newLimit);
     }
@@ -199,7 +207,7 @@ contract PolicyFactory {
         uint16 triggerBps,
         uint256 deductible,
         uint256 payoutCap
-    ) external returns (uint256 policyId) {
+    ) external whenNotPaused returns (uint256 policyId) {
         if (notional == 0 || payoutCap == 0) revert InvalidAmount();
         if (underwritingPaused) revert UnderwritingPaused(bytes32("MANUAL_PAUSE"));
         if (!pricingEngine.isSupportedSymbol(symbol)) revert UnsupportedSymbol(symbol);
@@ -240,6 +248,7 @@ contract PolicyFactory {
             payoutAmount: 0,
             status: PolicyStatus.Active
         });
+
         policyIdsByHolder[msg.sender].push(policyId);
         activePolicyIndex[policyId] = activePolicyIds.length;
         activePolicyIds.push(policyId);
@@ -269,33 +278,6 @@ contract PolicyFactory {
         for (uint256 i = 0; i < policyIds.length; i++) {
             _settlePolicy(policyIds[i]);
         }
-    }
-
-    function _settlePolicy(uint256 policyId) internal {
-        Policy storage policy = policies[policyId];
-        if (policy.status != PolicyStatus.Active) revert PolicyNotActive();
-        if (block.timestamp < policy.expiry) revert PolicyNotExpired();
-
-        (uint256 exitPrice,) = pricingEngine.getSettlementPrice(policy.symbol, policy.expiry);
-        uint256 payout = _calculatePayout(policy, exitPrice);
-
-        policy.exitPrice = exitPrice;
-        policy.payoutAmount = payout;
-        policy.status = PolicyStatus.Settled;
-        policy.settledAt = block.timestamp;
-
-        if (payout > 0) {
-            vault.payClaim(policy.holder, payout);
-        }
-
-        uint256 releasedLiquidity = policy.reservedLiquidity - payout;
-        if (releasedLiquidity > 0) {
-            vault.releaseLiquidity(releasedLiquidity);
-        }
-        _decreaseExposure(policy.symbol, policy.isDownsideProtection, policy.expiry - policy.createdAt, policy.reservedLiquidity);
-        _removeActivePolicy(policyId);
-
-        emit PolicySettled(policyId, exitPrice, payout, releasedLiquidity);
     }
 
     function cancelPolicy(uint256 policyId) external {
@@ -376,32 +358,49 @@ contract PolicyFactory {
         );
     }
 
-    function _calculatePayout(Policy storage policy, uint256 exitPrice) internal view returns (uint256 payout) {
-        if (policy.entryPrice == 0) {
-            return 0;
+    function _settlePolicy(uint256 policyId) internal {
+        Policy storage policy = policies[policyId];
+        if (policy.status != PolicyStatus.Active) revert PolicyNotActive();
+        if (block.timestamp < policy.expiry) revert PolicyNotExpired();
+
+        (uint256 exitPrice,) = pricingEngine.getSettlementPrice(policy.symbol, policy.expiry);
+        uint256 payout = _calculatePayout(policy, exitPrice);
+
+        policy.exitPrice = exitPrice;
+        policy.payoutAmount = payout;
+        policy.status = PolicyStatus.Settled;
+        policy.settledAt = block.timestamp;
+
+        if (payout > 0) {
+            vault.payClaim(policy.holder, payout);
         }
+
+        uint256 releasedLiquidity = policy.reservedLiquidity - payout;
+        if (releasedLiquidity > 0) {
+            vault.releaseLiquidity(releasedLiquidity);
+        }
+
+        _decreaseExposure(policy.symbol, policy.isDownsideProtection, policy.expiry - policy.createdAt, policy.reservedLiquidity);
+        _removeActivePolicy(policyId);
+        emit PolicySettled(policyId, exitPrice, payout, releasedLiquidity);
+    }
+
+    function _calculatePayout(Policy storage policy, uint256 exitPrice) internal view returns (uint256 payout) {
+        if (policy.entryPrice == 0) return 0;
 
         uint256 rawPayout;
         if (policy.isDownsideProtection) {
-            if (exitPrice >= policy.strikePrice) {
-                return 0;
-            }
+            if (exitPrice >= policy.strikePrice) return 0;
             rawPayout = (policy.notional * (policy.strikePrice - exitPrice)) / policy.entryPrice;
         } else {
-            if (exitPrice <= policy.strikePrice) {
-                return 0;
-            }
+            if (exitPrice <= policy.strikePrice) return 0;
             rawPayout = (policy.notional * (exitPrice - policy.strikePrice)) / policy.entryPrice;
         }
 
-        if (rawPayout <= policy.deductible) {
-            return 0;
-        }
+        if (rawPayout <= policy.deductible) return 0;
 
         payout = rawPayout - policy.deductible;
-        if (payout > policy.payoutCap) {
-            payout = policy.payoutCap;
-        }
+        if (payout > policy.payoutCap) payout = policy.payoutCap;
     }
 
     function _removeActivePolicy(uint256 policyId) internal {
@@ -423,19 +422,11 @@ contract PolicyFactory {
         bool isDownsideProtection,
         uint256 duration,
         IPricingEngine.PremiumQuote memory quote
-    ) internal {
-        if (quote.oracleUsedFallback) {
-            underwritingPaused = true;
-            emit UnderwritingPauseUpdated(true, bytes32("ORACLE_FALLBACK"));
-            revert UnderwritingPaused(bytes32("ORACLE_FALLBACK"));
-        }
+    ) internal view {
+        if (quote.oracleUsedFallback) revert UnderwritingPaused(bytes32("ORACLE_FALLBACK"));
 
         uint256 currentUtilization = vault.utilizationBps();
-        if (currentUtilization >= emergencyPauseUtilizationBps) {
-            underwritingPaused = true;
-            emit UnderwritingPauseUpdated(true, bytes32("UTILIZATION"));
-            revert UnderwritingPaused(bytes32("UTILIZATION"));
-        }
+        if (currentUtilization >= emergencyPauseUtilizationBps) revert UnderwritingPaused(bytes32("UTILIZATION"));
 
         uint256 projectedAssets = vault.totalAssets() + quote.premium;
         uint256 projectedReserved = vault.totalReserved() + quote.payoutCap;
@@ -511,12 +502,8 @@ contract PolicyFactory {
     }
 
     function _termBucket(uint256 duration) internal pure returns (TermBucket bucket) {
-        if (duration <= SHORT_TERM_MAX) {
-            return TermBucket.Short;
-        }
-        if (duration <= MEDIUM_TERM_MAX) {
-            return TermBucket.Medium;
-        }
+        if (duration <= SHORT_TERM_MAX) return TermBucket.Short;
+        if (duration <= MEDIUM_TERM_MAX) return TermBucket.Medium;
         bucket = TermBucket.Long;
     }
 }

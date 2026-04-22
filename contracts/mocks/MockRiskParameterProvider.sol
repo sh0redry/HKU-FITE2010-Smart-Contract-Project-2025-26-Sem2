@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "@openzeppelin/contracts/access/Ownable.sol";
+
 import "../interfaces/IRiskParameterProvider.sol";
 
-contract MockRiskParameterProvider is IRiskParameterProvider {
-    address public owner;
+contract MockRiskParameterProvider is IRiskParameterProvider, Ownable {
     mapping(bytes32 => RiskSnapshot) private snapshots;
 
-    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event RiskSnapshotUpdated(
         bytes32 indexed symbol,
         uint256 impliedVolBps,
@@ -15,25 +15,11 @@ contract MockRiskParameterProvider is IRiskParameterProvider {
         bytes32 indexed sourceTag
     );
 
-    error NotOwner();
     error InvalidAddress();
     error InvalidSnapshot();
 
-    modifier onlyOwner() {
-        if (msg.sender != owner) revert NotOwner();
-        _;
-    }
-
-    constructor(address initialOwner) {
+    constructor(address initialOwner) Ownable(initialOwner) {
         if (initialOwner == address(0)) revert InvalidAddress();
-        owner = initialOwner;
-        emit OwnershipTransferred(address(0), initialOwner);
-    }
-
-    function transferOwnership(address newOwner) external onlyOwner {
-        if (newOwner == address(0)) revert InvalidAddress();
-        emit OwnershipTransferred(owner, newOwner);
-        owner = newOwner;
     }
 
     function setRiskSnapshot(bytes32 symbol, RiskSnapshot calldata snapshot) external onlyOwner {

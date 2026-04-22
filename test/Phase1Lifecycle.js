@@ -2,14 +2,19 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { loadFixture, time } = require("@nomicfoundation/hardhat-toolbox/network-helpers");
 
-describe("Phase 6 Oracle Automation Lifecycle", function () {
+describe("Phase 8 Governance And Multi-Market Lifecycle", function () {
   const AAPL = ethers.encodeBytes32String("AAPL");
   const MSFT = ethers.encodeBytes32String("MSFT");
   const NVDA = ethers.encodeBytes32String("NVDA");
   const TSLA = ethers.encodeBytes32String("TSLA");
+  const HK_0700 = ethers.encodeBytes32String("0700HK");
+  const HK_9988 = ethers.encodeBytes32String("9988HK");
+  const HK_0005 = ethers.encodeBytes32String("0005HK");
   const USDC_DECIMALS = 6;
   const SETTLEMENT_MODE_CURRENT = 0;
   const SETTLEMENT_MODE_NEXT_OPEN = 1;
+  const CALENDAR_US = 1;
+  const CALENDAR_HK = 2;
 
   function riskSnapshot({
     impliedVolBps,
@@ -41,7 +46,7 @@ describe("Phase 6 Oracle Automation Lifecycle", function () {
   }
 
   async function deployFixture() {
-    const [owner, lp, buyer] = await ethers.getSigners();
+    const [owner, lp, buyer, riskManager, oracleManager, pauser] = await ethers.getSigners();
 
     const MockUSDC = await ethers.getContractFactory("MockUSDC");
     const mockUsdc = await MockUSDC.deploy(owner.address);
@@ -95,10 +100,18 @@ describe("Phase 6 Oracle Automation Lifecycle", function () {
       closeBufferMinutes: 15,
       overnightGapSurchargeBps: 120,
       enforceMarketHours: false,
-      useUsEquityCalendar: true,
+      calendarType: CALENDAR_US,
       allowFallbackOracle: true,
       settlementMode: SETTLEMENT_MODE_CURRENT,
       isActive: true
+    };
+
+    const hkConfig = {
+      ...baseConfig,
+      basePremiumBps: 160,
+      enforceMarketHours: true,
+      calendarType: CALENDAR_HK,
+      settlementMode: SETTLEMENT_MODE_CURRENT
     };
 
     await oracleAdapter.configureFeed(AAPL, {
@@ -146,6 +159,41 @@ describe("Phase 6 Oracle Automation Lifecycle", function () {
     await pricingOracle.configureMarket(MSFT, {
       ...baseConfig,
       basePremiumBps: 135
+    });
+    const hk0700SpotFeed = await MockPriceFeed.deploy(320n * 10n ** 8n, 8, owner.address);
+    await hk0700SpotFeed.waitForDeployment();
+    await oracleAdapter.configureFeed(HK_0700, {
+      primaryFeed: await hk0700SpotFeed.getAddress(),
+      fallbackFeed: ethers.ZeroAddress,
+      maxStaleness: 365 * 24 * 3600,
+      isActive: true
+    });
+    await pricingOracle.configureMarket(HK_0700, hkConfig);
+
+    const hk9988SpotFeed = await MockPriceFeed.deploy(92n * 10n ** 8n, 8, owner.address);
+    await hk9988SpotFeed.waitForDeployment();
+    await oracleAdapter.configureFeed(HK_9988, {
+      primaryFeed: await hk9988SpotFeed.getAddress(),
+      fallbackFeed: ethers.ZeroAddress,
+      maxStaleness: 365 * 24 * 3600,
+      isActive: true
+    });
+    await pricingOracle.configureMarket(HK_9988, {
+      ...hkConfig,
+      basePremiumBps: 170
+    });
+
+    const hk0005SpotFeed = await MockPriceFeed.deploy(64n * 10n ** 8n, 8, owner.address);
+    await hk0005SpotFeed.waitForDeployment();
+    await oracleAdapter.configureFeed(HK_0005, {
+      primaryFeed: await hk0005SpotFeed.getAddress(),
+      fallbackFeed: ethers.ZeroAddress,
+      maxStaleness: 365 * 24 * 3600,
+      isActive: true
+    });
+    await pricingOracle.configureMarket(HK_0005, {
+      ...hkConfig,
+      basePremiumBps: 140
     });
 
     await riskParameterProvider.setRiskSnapshot(
@@ -212,7 +260,60 @@ describe("Phase 6 Oracle Automation Lifecycle", function () {
         sourceTag: "TEST_MSFT"
       })
     );
+    await riskParameterProvider.setRiskSnapshot(
+      HK_0700,
+      riskSnapshot({
+        impliedVolBps: 2600,
+        downsideSkewBps: 115,
+        upsideSkewBps: 90,
+        shortTermMultiplierBps: 10180,
+        mediumTermMultiplierBps: 9980,
+        longTermMultiplierBps: 9720,
+        downsideInventoryPressureBps: 70,
+        upsideInventoryPressureBps: 45,
+        stressPremiumBps: 48,
+        riskScoreBps: 5900,
+        sourceTag: "TEST_HK0700"
+      })
+    );
+    await riskParameterProvider.setRiskSnapshot(
+      HK_9988,
+      riskSnapshot({
+        impliedVolBps: 3000,
+        downsideSkewBps: 135,
+        upsideSkewBps: 105,
+        shortTermMultiplierBps: 10350,
+        mediumTermMultiplierBps: 10080,
+        longTermMultiplierBps: 9760,
+        downsideInventoryPressureBps: 85,
+        upsideInventoryPressureBps: 55,
+        stressPremiumBps: 56,
+        riskScoreBps: 6400,
+        sourceTag: "TEST_HK9988"
+      })
+    );
+    await riskParameterProvider.setRiskSnapshot(
+      HK_0005,
+      riskSnapshot({
+        impliedVolBps: 2200,
+        downsideSkewBps: 95,
+        upsideSkewBps: 80,
+        shortTermMultiplierBps: 10080,
+        mediumTermMultiplierBps: 9920,
+        longTermMultiplierBps: 9680,
+        downsideInventoryPressureBps: 52,
+        upsideInventoryPressureBps: 32,
+        stressPremiumBps: 38,
+        riskScoreBps: 5200,
+        sourceTag: "TEST_HK0005"
+      })
+    );
     await insuranceVault.setPolicyManager(await policyFactory.getAddress());
+    await pricingOracle.grantRole(await pricingOracle.RISK_MANAGER_ROLE(), riskManager.address);
+    await pricingOracle.grantRole(await pricingOracle.ORACLE_MANAGER_ROLE(), oracleManager.address);
+    await pricingOracle.grantRole(await pricingOracle.PAUSER_ROLE(), pauser.address);
+    await policyFactory.grantRole(await policyFactory.RISK_MANAGER_ROLE(), riskManager.address);
+    await policyFactory.grantRole(await policyFactory.PAUSER_ROLE(), pauser.address);
     await policyFactory.configureRiskLimits(
       9000,
       8500,
@@ -230,11 +331,17 @@ describe("Phase 6 Oracle Automation Lifecycle", function () {
       owner,
       lp,
       buyer,
+      riskManager,
+      oracleManager,
+      pauser,
       mockUsdc,
       spotFeed,
       tslaSpotFeed,
       nvdaSpotFeed,
       msftSpotFeed,
+      hk0700SpotFeed,
+      hk9988SpotFeed,
+      hk0005SpotFeed,
       oracleAdapter,
       riskParameterProvider,
       pricingOracle,
@@ -403,6 +510,42 @@ describe("Phase 6 Oracle Automation Lifecycle", function () {
     expect(await pricingOracle.isSupportedSymbol(TSLA)).to.equal(true);
     expect(await pricingOracle.isSupportedSymbol(NVDA)).to.equal(true);
     expect(await pricingOracle.isSupportedSymbol(MSFT)).to.equal(true);
+    expect(await pricingOracle.isSupportedSymbol(HK_0700)).to.equal(true);
+    expect(await pricingOracle.isSupportedSymbol(HK_9988)).to.equal(true);
+    expect(await pricingOracle.isSupportedSymbol(HK_0005)).to.equal(true);
+  });
+
+  it("lets Hong Kong symbols be quoted and bought independently from U.S. symbols", async function () {
+    const { lp, buyer, mockUsdc, insuranceVault, policyFactory } = await loadFixture(deployFixture);
+
+    await approveAndDeposit(mockUsdc, insuranceVault, lp, ethers.parseUnits("20000", USDC_DECIMALS));
+
+    const quote = await policyFactory.previewPolicy(
+      HK_0700,
+      false,
+      ethers.parseUnits("1200", USDC_DECIMALS),
+      12 * 3600,
+      500,
+      ethers.parseUnits("10", USDC_DECIMALS),
+      ethers.parseUnits("400", USDC_DECIMALS)
+    );
+
+    expect(quote.premium).to.be.gt(0);
+    expect(quote.spotPrice).to.equal(ethers.parseEther("320"));
+
+    await mockUsdc.connect(buyer).approve(await insuranceVault.getAddress(), quote.premium);
+    await policyFactory.connect(buyer).purchasePolicy(
+      HK_0700,
+      false,
+      ethers.parseUnits("1200", USDC_DECIMALS),
+      12 * 3600,
+      500,
+      ethers.parseUnits("10", USDC_DECIMALS),
+      ethers.parseUnits("400", USDC_DECIMALS)
+    );
+
+    const policy = await policyFactory.getPolicy(1);
+    expect(policy.symbol).to.equal(HK_0700);
   });
 
   it("uses risk snapshots to differentiate premiums across symbols", async function () {
@@ -466,7 +609,7 @@ describe("Phase 6 Oracle Automation Lifecycle", function () {
       closeBufferMinutes: 15,
       overnightGapSurchargeBps: 120,
       enforceMarketHours: false,
-      useUsEquityCalendar: true,
+      calendarType: CALENDAR_US,
       allowFallbackOracle: true,
       settlementMode: SETTLEMENT_MODE_NEXT_OPEN,
       isActive: true
@@ -578,6 +721,32 @@ describe("Phase 6 Oracle Automation Lifecycle", function () {
     expect(await pricingOracle.isMarketOpen(ethers.encodeBytes32String("AMD"))).to.equal(true);
   });
 
+  it("respects Hong Kong market hours and blocks buying outside the HKT session", async function () {
+    const { lp, buyer, mockUsdc, insuranceVault, policyFactory, pricingOracle } = await loadFixture(deployFixture);
+    const hkNotional = ethers.parseUnits("1000", USDC_DECIMALS);
+    const hkPayoutCap = ethers.parseUnits("500", USDC_DECIMALS);
+
+    await approveAndDeposit(mockUsdc, insuranceVault, lp, ethers.parseUnits("10000", USDC_DECIMALS));
+
+    await time.increaseTo(utcTimestamp(2026, 6, 15, 0, 30));
+    expect(await pricingOracle.isMarketOpen(HK_0700)).to.equal(false);
+    await expect(
+      policyFactory.previewPolicy(HK_0700, true, hkNotional, 24 * 3600, 1000, 0, hkPayoutCap)
+    ).to.be.revertedWithCustomError(pricingOracle, "MarketClosed");
+
+    await time.increaseTo(utcTimestamp(2026, 6, 15, 1, 45));
+    expect(await pricingOracle.isMarketOpen(HK_0700)).to.equal(true);
+
+    const quote = await policyFactory.previewPolicy(HK_0700, true, hkNotional, 24 * 3600, 1000, 0, hkPayoutCap);
+    expect(quote.premium).to.be.gt(0);
+
+    await mockUsdc.connect(buyer).approve(await insuranceVault.getAddress(), quote.premium);
+    await policyFactory.connect(buyer).purchasePolicy(HK_0700, true, hkNotional, 24 * 3600, 1000, 0, hkPayoutCap);
+
+    const policy = await policyFactory.getPolicy(1);
+    expect(policy.symbol).to.equal(HK_0700);
+  });
+
   it("treats configured US holidays as closed market days", async function () {
     const { pricingOracle, policyFactory, baseConfig, oracleAdapter } = await loadFixture(deployFixture);
     const IBM = ethers.encodeBytes32String("IBM");
@@ -595,7 +764,7 @@ describe("Phase 6 Oracle Automation Lifecycle", function () {
       ...baseConfig,
       enforceMarketHours: true
     });
-    await pricingOracle.setHolidayClosure(20260703, true);
+    await pricingOracle.setCalendarClosure(CALENDAR_US, 20260703, true);
 
     await time.increaseTo(utcTimestamp(2026, 6, 3, 14, 0));
     expect(await pricingOracle.isMarketOpen(IBM)).to.equal(false);
@@ -917,7 +1086,36 @@ describe("Phase 6 Oracle Automation Lifecycle", function () {
         0,
         ethers.parseUnits("500", USDC_DECIMALS)
       )
-    ).to.be.revertedWithCustomError(policyFactory, "UnderwritingPaused");
+    ).to.be.revertedWithCustomError(policyFactory, "EnforcedPause");
+  });
+
+  it("separates governor, risk, oracle, and pauser duties", async function () {
+    const { buyer, riskManager, oracleManager, pauser, pricingOracle, policyFactory } = await loadFixture(deployFixture);
+
+    await policyFactory.connect(riskManager).setSymbolExposureLimit(AAPL, ethers.parseUnits("750", USDC_DECIMALS));
+    expect(await policyFactory.symbolExposureLimit(AAPL)).to.equal(ethers.parseUnits("750", USDC_DECIMALS));
+
+    await pricingOracle.connect(pauser).pauseQuoting();
+    await expect(
+      pricingOracle.quotePremium(
+        AAPL,
+        ethers.parseUnits("1000", USDC_DECIMALS),
+        24 * 3600,
+        1000,
+        0,
+        ethers.parseUnits("500", USDC_DECIMALS),
+        0,
+        true
+      )
+    ).to.be.revertedWithCustomError(pricingOracle, "EnforcedPause");
+    await pricingOracle.unpauseQuoting();
+
+    await pricingOracle.connect(oracleManager).setRiskParameterProvider(oracleManager.address);
+    expect(await pricingOracle.riskParameterProvider()).to.equal(oracleManager.address);
+
+    await expect(
+      policyFactory.connect(buyer).setSymbolExposureLimit(AAPL, ethers.parseUnits("1000", USDC_DECIMALS))
+    ).to.be.reverted;
   });
 
   it("auto-pauses underwriting when utilization is already extreme", async function () {

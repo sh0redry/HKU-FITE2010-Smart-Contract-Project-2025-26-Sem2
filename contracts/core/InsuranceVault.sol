@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "@openzeppelin/contracts/access/Ownable.sol";
+
 import "../interfaces/IERC20.sol";
 import "../interfaces/IInsuranceVault.sol";
 
-contract InsuranceVault is IInsuranceVault {
+contract InsuranceVault is IInsuranceVault, Ownable {
     uint256 public constant BPS = 10_000;
     uint256 public constant SHARE_PRICE_SCALE = 1e18;
 
     IERC20 public immutable assetToken;
 
-    address public owner;
     address public policyManager;
 
     address public immutable override settlementAsset;
@@ -26,7 +27,6 @@ contract InsuranceVault is IInsuranceVault {
 
     uint256 private _lock;
 
-    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event PolicyManagerUpdated(address indexed previousManager, address indexed newManager);
     event Deposited(address indexed provider, uint256 assets, uint256 sharesMinted);
     event Withdrawn(address indexed provider, uint256 assets, uint256 sharesBurned);
@@ -35,18 +35,12 @@ contract InsuranceVault is IInsuranceVault {
     event PremiumCollected(address indexed payer, uint256 amount, uint256 realizedPremiumsAfter);
     event ClaimPaid(address indexed beneficiary, uint256 amount, uint256 totalReservedAfter, uint256 claimsPaidAfter);
 
-    error NotOwner();
     error NotPolicyManager();
     error InvalidAddress();
     error InvalidAmount();
     error InsufficientLiquidity();
     error Reentrancy();
     error TokenTransferFailed();
-
-    modifier onlyOwner() {
-        if (msg.sender != owner) revert NotOwner();
-        _;
-    }
 
     modifier onlyPolicyManager() {
         if (msg.sender != policyManager) revert NotPolicyManager();
@@ -60,18 +54,10 @@ contract InsuranceVault is IInsuranceVault {
         _lock = 0;
     }
 
-    constructor(address initialOwner, address assetTokenAddress) {
+    constructor(address initialOwner, address assetTokenAddress) Ownable(initialOwner) {
         if (initialOwner == address(0) || assetTokenAddress == address(0)) revert InvalidAddress();
         assetToken = IERC20(assetTokenAddress);
         settlementAsset = assetTokenAddress;
-        owner = initialOwner;
-        emit OwnershipTransferred(address(0), initialOwner);
-    }
-
-    function transferOwnership(address newOwner) external onlyOwner {
-        if (newOwner == address(0)) revert InvalidAddress();
-        emit OwnershipTransferred(owner, newOwner);
-        owner = newOwner;
     }
 
     function setPolicyManager(address newPolicyManager) external onlyOwner {

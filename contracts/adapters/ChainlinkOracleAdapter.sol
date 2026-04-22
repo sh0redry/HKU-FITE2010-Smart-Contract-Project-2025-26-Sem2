@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "@openzeppelin/contracts/access/Ownable.sol";
+
 import "../interfaces/IOracleAdapter.sol";
 import "../interfaces/IChainlinkAggregator.sol";
 
-contract ChainlinkOracleAdapter is IOracleAdapter {
+contract ChainlinkOracleAdapter is IOracleAdapter, Ownable {
     uint256 private constant MAX_DECIMALS = 18;
 
     struct FeedConfig {
@@ -14,10 +16,8 @@ contract ChainlinkOracleAdapter is IOracleAdapter {
         bool isActive;
     }
 
-    address public owner;
     mapping(bytes32 => FeedConfig) public feedConfigs;
 
-    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event FeedConfigured(
         bytes32 indexed symbol,
         address indexed primaryFeed,
@@ -25,25 +25,11 @@ contract ChainlinkOracleAdapter is IOracleAdapter {
         uint256 maxStaleness
     );
 
-    error NotOwner();
     error InvalidAddress();
     error InvalidConfig();
 
-    modifier onlyOwner() {
-        if (msg.sender != owner) revert NotOwner();
-        _;
-    }
-
-    constructor(address initialOwner) {
+    constructor(address initialOwner) Ownable(initialOwner) {
         if (initialOwner == address(0)) revert InvalidAddress();
-        owner = initialOwner;
-        emit OwnershipTransferred(address(0), initialOwner);
-    }
-
-    function transferOwnership(address newOwner) external onlyOwner {
-        if (newOwner == address(0)) revert InvalidAddress();
-        emit OwnershipTransferred(owner, newOwner);
-        owner = newOwner;
     }
 
     function configureFeed(bytes32 symbol, FeedConfig calldata config) external onlyOwner {

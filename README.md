@@ -1,6 +1,6 @@
 # Stock Hedge Insurance MVP
 
-This repository contains a U.S. stock insurance demo focused on American equities such as `AAPL`, `TSLA`, `NVDA`, and `MSFT`, with `MockUSDC` used as the settlement asset.
+This repository contains a stock insurance demo with `MockUSDC` settlement, now covering both U.S. equities and selected Hong Kong equities so the demo can offer staggered market coverage across more of the day.
 
 The project now includes the Phase 4 pricing upgrade:
 
@@ -10,15 +10,16 @@ The project now includes the Phase 4 pricing upgrade:
 - the architecture is ready for a future off-chain risk engine such as `Chainlink Functions` or a backend service
 - Phase 5 market logic adds U.S. equity session handling, DST-aware clocks, holiday closures, close-buffer purchase blocking, and next-open settlement rules
 - Phase 6 adds an oracle-adapter layer, a Chainlink-style price source path, fallback-oracle handling, and keeper-based automatic settlement
+- Phase 8 adds OpenZeppelin-based governance roles, a split buyer/admin frontend, and Hong Kong market support
 
 ## Architecture
 
 ### On-chain components
 
 - `contracts/core/InsuranceVault.sol`
-  LP vault for `MockUSDC` deposits, share accounting, premium collection, claim payouts, and reserve locking.
+  LP vault for `MockUSDC` deposits, share accounting, premium collection, claim payouts, and reserve locking. It now uses OpenZeppelin `Ownable`.
 - `contracts/core/PolicyFactory.sol`
-  Creates policies, enforces product terms, stores lifecycle data, supports cancellation after a lock delay, and settles claims.
+  Creates policies, enforces product terms, stores lifecycle data, supports cancellation after a lock delay, settles claims, and now uses OpenZeppelin `AccessControl` plus `Pausable` for underwriting governance.
 - `contracts/engines/PricingOracle.sol`
   Performs lightweight final pricing on-chain using:
   - spot price
@@ -33,9 +34,9 @@ The project now includes the Phase 4 pricing upgrade:
 - `contracts/interfaces/IOracleAdapter.sol`
   Interface for spot-price adapters so pricing never reads raw feeds directly.
 - `contracts/mocks/MockRiskParameterProvider.sol`
-  Owner-managed demo provider that mimics a future off-chain risk engine feed.
+  OpenZeppelin `Ownable` demo provider that mimics a future off-chain risk engine feed.
 - `contracts/adapters/ChainlinkOracleAdapter.sol`
-  Chainlink-style adapter that reads primary and fallback feeds, normalizes decimals, and enforces freshness via `maxStaleness`.
+  OpenZeppelin `Ownable` Chainlink-style adapter that reads primary and fallback feeds, normalizes decimals, and enforces freshness via `maxStaleness`.
 - `contracts/automation/PolicySettlementAutomation.sol`
   Keeper-compatible settlement worker that scans active policies and triggers batch settlement when policies are ready.
 
@@ -46,7 +47,7 @@ The project now includes the Phase 4 pricing upgrade:
 - `contracts/mocks/MockPriceFeed.sol`
   Local mock spot-price feed.
 - `contracts/mocks/StockHedgeDemoDeployer.sol`
-  Deploys a ready-to-test Remix demo stack with four supported U.S. symbols and seeded risk snapshots.
+  Deploys a ready-to-test Remix demo stack with U.S. and Hong Kong symbols plus seeded risk snapshots.
 - `scripts/deploy.js`
   Deploys the local Hardhat stack, seeds balances, injects initial LP liquidity, configures market snapshots, and writes frontend addresses.
 - `test/Phase1Lifecycle.js`
@@ -55,9 +56,11 @@ The project now includes the Phase 4 pricing upgrade:
 ### Frontends
 
 - `frontend/index.html`
-  Manual chain-connected test page for quote, buy, cancel, settle, deposit, and withdraw flows.
+  Buyer-facing chain-connected page for quote, buy, cancel, settle, deposit, and withdraw flows.
 - `frontend/simulation.html`
   Off-chain scenario replay page that simulates one or more policies across sample stock-price paths and shows premium, payout, and protocol revenue.
+- `frontend/admin.html`
+  Manager-facing monitoring and governance console for vault health, pauses, risk limits, market configs, and calendar closures.
 
 ## Phase 4 pricing model
 
@@ -160,8 +163,47 @@ The current whitelist includes:
 - `TSLA`
 - `NVDA`
 - `MSFT`
+- `0700HK`
+- `9988HK`
+- `0005HK`
 
 Each symbol has its own spot price and its own baseline risk profile, so quotes are no longer nearly identical across different names.
+
+## Phase 8 governance model
+
+The platform now separates administrative responsibilities:
+
+- `governor`
+  Can unpause quoting and underwriting, and remains the default admin for role grants.
+- `riskManager`
+  Can update risk limits, exposure caps, market listings, market hours, and calendar closures.
+- `oracleManager`
+  Can rotate the oracle adapter and risk-parameter provider.
+- `pauser`
+  Can pause quoting and underwriting during abnormal conditions.
+
+OpenZeppelin is now used in the governance-sensitive parts of the stack:
+
+- `AccessControl` + `Pausable` in `PolicyFactory`
+- `AccessControl` + `Pausable` in `PricingOracle`
+- `Ownable` in `InsuranceVault`
+- `Ownable` in `ChainlinkOracleAdapter`
+- `Ownable` in `MockRiskParameterProvider`
+- `Ownable` in `MockUSDC`
+
+This also means you can use two separate frontends in local demos:
+
+- a buyer wallet on `frontend/index.html`
+- a manager wallet on `frontend/admin.html`
+
+The deploy script now writes dedicated local accounts for:
+
+- `governor`
+- `riskManager`
+- `oracleManager`
+- `pauser`
+- `lp`
+- `buyer`
 
 ## Product model
 
@@ -212,26 +254,35 @@ npm run deploy:local
 7. Open:
    - `frontend/index.html`
    - `frontend/simulation.html`
+   - `frontend/admin.html`
 8. The manual page will try to auto-load addresses from `frontend/deployments/localhost.json`.
+
+### Suggested local role usage
+
+- Import `buyer` into MetaMask for `frontend/index.html`
+- Import `governor`, `riskManager`, `oracleManager`, or `pauser` into MetaMask for `frontend/admin.html`
+- Import `lp` if you want to test additional manual liquidity operations
 
 ## Demo defaults
 
 - settlement asset: `MockUSDC`
 - allowed trigger range: `5%` to `20%`
-- market-hours enforcement: disabled in demo deployment for easier testing
+- market-hours enforcement: enabled by default for both U.S. and Hong Kong symbols
 - max notional per policy: `50,000 USDC`
 - local deploy script seeds:
   - `200,000 USDC` into the vault from the LP account
   - `250,000 USDC` to the LP wallet
   - `50,000 USDC` to the buyer wallet
   - `100,000 USDC` to the deployer wallet
+- local deploy script also assigns separate governance role accounts for monitoring and parameter updates
 
 ## Current assumptions
 
 - policies settle against the current oracle spot price when `settlePolicy` is called
 - the risk provider snapshot is assumed fresh enough for the quote unless `updatedAt` is missing
 - this is still an educational MVP rather than production-ready insurance infrastructure
-- U.S. market sessions are modeled with a simple UTC trading window, not a full holiday and DST calendar
+- U.S. and Hong Kong market sessions are modeled with simplified local-session windows rather than full exchange calendars
+- Hong Kong symbols are restricted to Hong Kong market hours as well; they are not purchasable while the Hong Kong market is closed
 
 ## Hardhat coverage
 
@@ -242,7 +293,7 @@ The current Hardhat suite covers:
 - reserve release when no claim is due
 - settlement blocked before expiry
 - unsupported symbol rejection
-- whitelist support for `AAPL / TSLA / NVDA / MSFT`
+- whitelist support for `AAPL / TSLA / NVDA / MSFT / 0700HK / 9988HK / 0005HK`
 - price differentiation from symbol-specific risk snapshots
 - trigger validation in the `5%` to `20%` band
 - missing risk snapshot rejection
@@ -257,5 +308,6 @@ The current Hardhat suite covers:
 - next-open settlement gating for after-hours expiry
 - fallback oracle usage when the primary feed is stale
 - keeper-based automatic settlement
+- role separation for governor, risk, oracle, and pauser duties
 - utilization validation above `100%`
 - underwriting result and LP share-price tracking after profitable underwriting

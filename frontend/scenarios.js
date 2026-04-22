@@ -54,6 +54,48 @@ export const MARKET_CONFIGS = {
     stressPremiumBps: 40,
     riskScoreBps: 5400,
     startPrice: 415
+  },
+  "0700HK": {
+    basePremiumBps: 160,
+    annualVolBps: 2600,
+    downsideSkewBps: 115,
+    upsideSkewBps: 90,
+    shortTermMultiplierBps: 10180,
+    mediumTermMultiplierBps: 9980,
+    longTermMultiplierBps: 9720,
+    downsideInventoryPressureBps: 70,
+    upsideInventoryPressureBps: 45,
+    stressPremiumBps: 48,
+    riskScoreBps: 5900,
+    startPrice: 320
+  },
+  "9988HK": {
+    basePremiumBps: 170,
+    annualVolBps: 3000,
+    downsideSkewBps: 135,
+    upsideSkewBps: 105,
+    shortTermMultiplierBps: 10350,
+    mediumTermMultiplierBps: 10080,
+    longTermMultiplierBps: 9760,
+    downsideInventoryPressureBps: 85,
+    upsideInventoryPressureBps: 55,
+    stressPremiumBps: 56,
+    riskScoreBps: 6400,
+    startPrice: 92
+  },
+  "0005HK": {
+    basePremiumBps: 140,
+    annualVolBps: 2200,
+    downsideSkewBps: 95,
+    upsideSkewBps: 80,
+    shortTermMultiplierBps: 10080,
+    mediumTermMultiplierBps: 9920,
+    longTermMultiplierBps: 9680,
+    downsideInventoryPressureBps: 52,
+    upsideInventoryPressureBps: 32,
+    stressPremiumBps: 38,
+    riskScoreBps: 5200,
+    startPrice: 64
   }
 };
 
@@ -101,5 +143,38 @@ export const MARKET_SCENARIOS = {
     { date: "2025-01-10", price: 424 },
     { date: "2025-01-13", price: 419 },
     { date: "2025-01-14", price: 412 }
+  ],
+  "0700HK": [
+    { date: "2025-01-02", price: 320 },
+    { date: "2025-01-03", price: 326 },
+    { date: "2025-01-06", price: 318 },
+    { date: "2025-01-07", price: 309 },
+    { date: "2025-01-08", price: 301 },
+    { date: "2025-01-09", price: 314 },
+    { date: "2025-01-10", price: 321 },
+    { date: "2025-01-13", price: 329 },
+    { date: "2025-01-14", price: 333 }
+  ],
+  "9988HK": [
+    { date: "2025-01-02", price: 92 },
+    { date: "2025-01-03", price: 90 },
+    { date: "2025-01-06", price: 88 },
+    { date: "2025-01-07", price: 85 },
+    { date: "2025-01-08", price: 83 },
+    { date: "2025-01-09", price: 87 },
+    { date: "2025-01-10", price: 91 },
+    { date: "2025-01-13", price: 95 },
+    { date: "2025-01-14", price: 97 }
+  ],
+  "0005HK": [
+    { date: "2025-01-02", price: 64 },
+    { date: "2025-01-03", price: 64.5 },
+    { date: "2025-01-06", price: 65.1 },
+    { date: "2025-01-07", price: 64.2 },
+    { date: "2025-01-08", price: 63.4 },
+    { date: "2025-01-09", price: 62.9 },
+    { date: "2025-01-10", price: 63.8 },
+    { date: "2025-01-13", price: 64.6 },
+    { date: "2025-01-14", price: 65.3 }
   ]
 };

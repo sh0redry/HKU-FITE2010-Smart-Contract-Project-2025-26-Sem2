@@ -1,7 +1,10 @@
 const fs = require("fs");
 const path = require("path");
 const { ethers } = require("hardhat");
+const SETTLEMENT_MODE_CURRENT = 0;
 const SETTLEMENT_MODE_NEXT_OPEN = 1;
+const CALENDAR_US = 1;
+const CALENDAR_HK = 2;
 
 function riskSnapshot({
   impliedVolBps,
@@ -33,7 +36,8 @@ function riskSnapshot({
 }
 
 async function main() {
-  const [deployer, lp, buyer] = await ethers.getSigners();
+  const [governor, lp, buyer, riskManager, oracleManager, pauser] = await ethers.getSigners();
+  const deployer = governor;
 
   const MockUSDC = await ethers.getContractFactory("MockUSDC");
   const mockUsdc = await MockUSDC.deploy(deployer.address);
@@ -53,7 +57,7 @@ async function main() {
 
   const PricingOracle = await ethers.getContractFactory("PricingOracle");
   const pricingOracle = await PricingOracle.deploy(
-    deployer.address,
+    governor.address,
     await riskParameterProvider.getAddress(),
     await oracleAdapter.getAddress()
   );
@@ -65,7 +69,7 @@ async function main() {
 
   const PolicyFactory = await ethers.getContractFactory("PolicyFactory");
   const policyFactory = await PolicyFactory.deploy(
-    deployer.address,
+    governor.address,
     await insuranceVault.getAddress(),
     await pricingOracle.getAddress()
   );
@@ -75,10 +79,18 @@ async function main() {
   const settlementAutomation = await PolicySettlementAutomation.deploy(await policyFactory.getAddress(), 10);
   await settlementAutomation.waitForDeployment();
 
+  await pricingOracle.grantRole(await pricingOracle.RISK_MANAGER_ROLE(), riskManager.address);
+  await pricingOracle.grantRole(await pricingOracle.ORACLE_MANAGER_ROLE(), oracleManager.address);
+  await pricingOracle.grantRole(await pricingOracle.PAUSER_ROLE(), pauser.address);
+  await policyFactory.grantRole(await policyFactory.RISK_MANAGER_ROLE(), riskManager.address);
+  await policyFactory.grantRole(await policyFactory.PAUSER_ROLE(), pauser.address);
+
   const marketSeedData = {
     AAPL: {
       spot: spotFeed,
       basePremiumBps: 150,
+      calendarType: CALENDAR_US,
+      enforceMarketHours: true,
       riskSnapshot: riskSnapshot({
         impliedVolBps: 2800,
         downsideSkewBps: 120,
@@ -96,6 +108,8 @@ async function main() {
     TSLA: {
       spot: await (await ethers.getContractFactory("MockPriceFeed")).deploy(172n * 10n ** 8n, 8, deployer.address),
       basePremiumBps: 190,
+      calendarType: CALENDAR_US,
+      enforceMarketHours: true,
       riskSnapshot: riskSnapshot({
         impliedVolBps: 4200,
         downsideSkewBps: 180,
@@ -113,6 +127,8 @@ async function main() {
     NVDA: {
       spot: await (await ethers.getContractFactory("MockPriceFeed")).deploy(890n * 10n ** 8n, 8, deployer.address),
       basePremiumBps: 175,
+      calendarType: CALENDAR_US,
+      enforceMarketHours: true,
       riskSnapshot: riskSnapshot({
         impliedVolBps: 3600,
         downsideSkewBps: 150,
@@ -130,6 +146,8 @@ async function main() {
     MSFT: {
       spot: await (await ethers.getContractFactory("MockPriceFeed")).deploy(415n * 10n ** 8n, 8, deployer.address),
       basePremiumBps: 135,
+      calendarType: CALENDAR_US,
+      enforceMarketHours: true,
       riskSnapshot: riskSnapshot({
         impliedVolBps: 2100,
         downsideSkewBps: 100,
@@ -142,6 +160,63 @@ async function main() {
         stressPremiumBps: 40,
         riskScoreBps: 5400,
         sourceTag: "CHAINLINK_FN"
+      })
+    },
+    "0700HK": {
+      spot: await (await ethers.getContractFactory("MockPriceFeed")).deploy(320n * 10n ** 8n, 8, deployer.address),
+      basePremiumBps: 160,
+      calendarType: CALENDAR_HK,
+      enforceMarketHours: true,
+      riskSnapshot: riskSnapshot({
+        impliedVolBps: 2600,
+        downsideSkewBps: 115,
+        upsideSkewBps: 90,
+        shortTermMultiplierBps: 10180,
+        mediumTermMultiplierBps: 9980,
+        longTermMultiplierBps: 9720,
+        downsideInventoryPressureBps: 70,
+        upsideInventoryPressureBps: 45,
+        stressPremiumBps: 48,
+        riskScoreBps: 5900,
+        sourceTag: "HK_FN"
+      })
+    },
+    "9988HK": {
+      spot: await (await ethers.getContractFactory("MockPriceFeed")).deploy(92n * 10n ** 8n, 8, deployer.address),
+      basePremiumBps: 170,
+      calendarType: CALENDAR_HK,
+      enforceMarketHours: true,
+      riskSnapshot: riskSnapshot({
+        impliedVolBps: 3000,
+        downsideSkewBps: 135,
+        upsideSkewBps: 105,
+        shortTermMultiplierBps: 10350,
+        mediumTermMultiplierBps: 10080,
+        longTermMultiplierBps: 9760,
+        downsideInventoryPressureBps: 85,
+        upsideInventoryPressureBps: 55,
+        stressPremiumBps: 56,
+        riskScoreBps: 6400,
+        sourceTag: "HK_FN"
+      })
+    },
+    "0005HK": {
+      spot: await (await ethers.getContractFactory("MockPriceFeed")).deploy(64n * 10n ** 8n, 8, deployer.address),
+      basePremiumBps: 140,
+      calendarType: CALENDAR_HK,
+      enforceMarketHours: true,
+      riskSnapshot: riskSnapshot({
+        impliedVolBps: 2200,
+        downsideSkewBps: 95,
+        upsideSkewBps: 80,
+        shortTermMultiplierBps: 10080,
+        mediumTermMultiplierBps: 9920,
+        longTermMultiplierBps: 9680,
+        downsideInventoryPressureBps: 52,
+        upsideInventoryPressureBps: 32,
+        stressPremiumBps: 38,
+        riskScoreBps: 5200,
+        sourceTag: "HK_FN"
       })
     }
   };
@@ -160,10 +235,10 @@ async function main() {
       closeMinutesLocal: 960,
       closeBufferMinutes: 15,
       overnightGapSurchargeBps: 120,
-      enforceMarketHours: false,
-      useUsEquityCalendar: true,
+      enforceMarketHours: marketSeedData[symbol].enforceMarketHours,
       allowFallbackOracle: true,
-      settlementMode: SETTLEMENT_MODE_NEXT_OPEN,
+      settlementMode: marketSeedData[symbol].calendarType === CALENDAR_US ? SETTLEMENT_MODE_NEXT_OPEN : SETTLEMENT_MODE_CURRENT,
+      calendarType: marketSeedData[symbol].calendarType,
       isActive: true
     });
 
@@ -218,9 +293,25 @@ async function main() {
       MSFT: {
         spotFeed: await marketSeedData.MSFT.spot.getAddress(),
         riskSnapshot: marketSeedData.MSFT.riskSnapshot
+      },
+      "0700HK": {
+        spotFeed: await marketSeedData["0700HK"].spot.getAddress(),
+        riskSnapshot: marketSeedData["0700HK"].riskSnapshot
+      },
+      "9988HK": {
+        spotFeed: await marketSeedData["9988HK"].spot.getAddress(),
+        riskSnapshot: marketSeedData["9988HK"].riskSnapshot
+      },
+      "0005HK": {
+        spotFeed: await marketSeedData["0005HK"].spot.getAddress(),
+        riskSnapshot: marketSeedData["0005HK"].riskSnapshot
       }
     },
     accounts: {
+      governor: governor.address,
+      riskManager: riskManager.address,
+      oracleManager: oracleManager.address,
+      pauser: pauser.address,
       deployer: deployer.address,
       lp: lp.address,
       buyer: buyer.address

@@ -1,22 +1,33 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
+
 import "../interfaces/IPricingEngine.sol";
 import "../interfaces/IOracleAdapter.sol";
 import "../interfaces/IRiskParameterProvider.sol";
 
-contract PricingOracle is IPricingEngine {
+contract PricingOracle is IPricingEngine, AccessControl, Pausable {
     uint256 public constant BPS = 10_000;
     uint256 public constant YEAR = 365 days;
     uint256 private constant DAY = 1 days;
     uint256 private constant SHORT_TERM_MAX = 7 days;
     uint256 private constant MEDIUM_TERM_MAX = 21 days;
-    uint256 private constant EASTERN_STANDARD_OFFSET = 5 hours;
-    uint256 private constant EASTERN_DAYLIGHT_OFFSET = 4 hours;
+    uint256 private constant HONG_KONG_OFFSET = 8 hours;
+    uint256 private constant US_STANDARD_ABS_OFFSET = 5 hours;
+    uint256 private constant US_DAYLIGHT_ABS_OFFSET = 4 hours;
 
-    address public owner;
-    address public override riskParameterProvider;
-    address public override oracleAdapter;
+    bytes32 public constant GOVERNOR_ROLE = keccak256("GOVERNOR_ROLE");
+    bytes32 public constant RISK_MANAGER_ROLE = keccak256("RISK_MANAGER_ROLE");
+    bytes32 public constant ORACLE_MANAGER_ROLE = keccak256("ORACLE_MANAGER_ROLE");
+    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
+
+    enum MarketCalendar {
+        None,
+        UsEquity,
+        HongKongEquity
+    }
 
     struct MarketConfig {
         uint256 minDuration;
@@ -30,9 +41,9 @@ contract PricingOracle is IPricingEngine {
         uint16 closeBufferMinutes;
         uint16 overnightGapSurchargeBps;
         bool enforceMarketHours;
-        bool useUsEquityCalendar;
         bool allowFallbackOracle;
         SettlementMode settlementMode;
+        MarketCalendar calendarType;
         bool isActive;
     }
 
@@ -48,9 +59,9 @@ contract PricingOracle is IPricingEngine {
         uint16 closeBufferMinutes;
         uint16 overnightGapSurchargeBps;
         bool enforceMarketHours;
-        bool useUsEquityCalendar;
         bool allowFallbackOracle;
         SettlementMode settlementMode;
+        MarketCalendar calendarType;
         bool isActive;
     }
 
@@ -64,21 +75,17 @@ contract PricingOracle is IPricingEngine {
         uint256 localDateKey;
     }
 
-    mapping(bytes32 => MarketConfig) private marketConfigs;
-    mapping(uint256 => bool) public holidayClosures;
+    address public override riskParameterProvider;
+    address public override oracleAdapter;
 
-    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
-    event MarketConfigured(
-        bytes32 indexed symbol,
-        uint256 basePremiumBps,
-        uint256 maxNotional
-    );
+    mapping(bytes32 => MarketConfig) private marketConfigs;
+    mapping(uint8 => mapping(uint256 => bool)) public calendarClosures;
+
+    event MarketConfigured(bytes32 indexed symbol, uint256 basePremiumBps, uint256 maxNotional);
     event RiskParameterProviderUpdated(address indexed previousProvider, address indexed newProvider);
     event OracleAdapterUpdated(address indexed previousAdapter, address indexed newAdapter);
-    event HolidayClosureUpdated(uint256 indexed dateKey, bool isClosed);
+    event CalendarClosureUpdated(uint8 indexed calendarType, uint256 indexed dateKey, bool isClosed);
 
-    error NotOwner();
-    error InvalidAddress();
     error MarketInactive(bytes32 symbol);
     error InvalidDuration();
     error NotionalTooLarge();
@@ -87,7 +94,6 @@ contract PricingOracle is IPricingEngine {
     error InvalidPayoutTerms();
     error MarketClosed(bytes32 symbol);
     error MarketClosingSoon(bytes32 symbol);
-    error InvalidOracleAnswer();
     error InvalidRiskProvider();
     error InvalidOracleAdapter();
     error MissingRiskSnapshot(bytes32 symbol);
@@ -95,42 +101,42 @@ contract PricingOracle is IPricingEngine {
     error OracleUnavailable(bytes32 symbol);
     error FallbackOracleDisabled(bytes32 symbol);
 
-    modifier onlyOwner() {
-        if (msg.sender != owner) revert NotOwner();
-        _;
-    }
+    constructor(address governor, address riskParameterProviderAddress, address oracleAdapterAddress) {
+        if (governor == address(0) || riskParameterProviderAddress == address(0) || oracleAdapterAddress == address(0)) {
+            revert InvalidOracleAdapter();
+        }
 
-    constructor(address initialOwner, address riskParameterProviderAddress, address oracleAdapterAddress) {
-        if (
-            initialOwner == address(0) || riskParameterProviderAddress == address(0) || oracleAdapterAddress == address(0)
-        ) revert InvalidAddress();
-        owner = initialOwner;
         riskParameterProvider = riskParameterProviderAddress;
         oracleAdapter = oracleAdapterAddress;
-        emit OwnershipTransferred(address(0), initialOwner);
-        emit RiskParameterProviderUpdated(address(0), riskParameterProviderAddress);
-        emit OracleAdapterUpdated(address(0), oracleAdapterAddress);
+
+        _grantRole(DEFAULT_ADMIN_ROLE, governor);
+        _grantRole(GOVERNOR_ROLE, governor);
+        _grantRole(RISK_MANAGER_ROLE, governor);
+        _grantRole(ORACLE_MANAGER_ROLE, governor);
+        _grantRole(PAUSER_ROLE, governor);
     }
 
-    function transferOwnership(address newOwner) external onlyOwner {
-        if (newOwner == address(0)) revert InvalidAddress();
-        emit OwnershipTransferred(owner, newOwner);
-        owner = newOwner;
+    function pauseQuoting() external onlyRole(PAUSER_ROLE) {
+        _pause();
     }
 
-    function setRiskParameterProvider(address newProvider) external onlyOwner {
+    function unpauseQuoting() external onlyRole(GOVERNOR_ROLE) {
+        _unpause();
+    }
+
+    function setRiskParameterProvider(address newProvider) external onlyRole(ORACLE_MANAGER_ROLE) {
         if (newProvider == address(0)) revert InvalidRiskProvider();
         emit RiskParameterProviderUpdated(riskParameterProvider, newProvider);
         riskParameterProvider = newProvider;
     }
 
-    function setOracleAdapter(address newAdapter) external onlyOwner {
+    function setOracleAdapter(address newAdapter) external onlyRole(ORACLE_MANAGER_ROLE) {
         if (newAdapter == address(0)) revert InvalidOracleAdapter();
         emit OracleAdapterUpdated(oracleAdapter, newAdapter);
         oracleAdapter = newAdapter;
     }
 
-    function configureMarket(bytes32 symbol, MarketConfigInput calldata config) external onlyOwner {
+    function configureMarket(bytes32 symbol, MarketConfigInput calldata config) external onlyRole(RISK_MANAGER_ROLE) {
         if (config.minDuration == 0 || config.maxDuration < config.minDuration) revert InvalidDuration();
         if (config.openMinutesLocal >= DAY / 1 minutes || config.closeMinutesLocal >= DAY / 1 minutes) {
             revert InvalidDuration();
@@ -141,33 +147,33 @@ contract PricingOracle is IPricingEngine {
             revert InvalidTrigger();
         }
 
-        MarketConfig storage market = marketConfigs[symbol];
-        market.minDuration = config.minDuration;
-        market.maxDuration = config.maxDuration;
-        market.basePremiumBps = config.basePremiumBps;
-        market.maxNotional = config.maxNotional;
-        market.minTriggerBps = config.minTriggerBps;
-        market.maxTriggerBps = config.maxTriggerBps;
-        market.openMinutesLocal = config.openMinutesLocal;
-        market.closeMinutesLocal = config.closeMinutesLocal;
-        market.closeBufferMinutes = config.closeBufferMinutes;
-        market.overnightGapSurchargeBps = config.overnightGapSurchargeBps;
-        market.enforceMarketHours = config.enforceMarketHours;
-        market.useUsEquityCalendar = config.useUsEquityCalendar;
-        market.allowFallbackOracle = config.allowFallbackOracle;
-        market.settlementMode = config.settlementMode;
-        market.isActive = config.isActive;
+        marketConfigs[symbol] = MarketConfig({
+            minDuration: config.minDuration,
+            maxDuration: config.maxDuration,
+            basePremiumBps: config.basePremiumBps,
+            maxNotional: config.maxNotional,
+            minTriggerBps: config.minTriggerBps,
+            maxTriggerBps: config.maxTriggerBps,
+            openMinutesLocal: config.openMinutesLocal,
+            closeMinutesLocal: config.closeMinutesLocal,
+            closeBufferMinutes: config.closeBufferMinutes,
+            overnightGapSurchargeBps: config.overnightGapSurchargeBps,
+            enforceMarketHours: config.enforceMarketHours,
+            allowFallbackOracle: config.allowFallbackOracle,
+            settlementMode: config.settlementMode,
+            calendarType: config.calendarType,
+            isActive: config.isActive
+        });
 
-        emit MarketConfigured(
-            symbol,
-            config.basePremiumBps,
-            config.maxNotional
-        );
+        emit MarketConfigured(symbol, config.basePremiumBps, config.maxNotional);
     }
 
-    function setHolidayClosure(uint256 dateKey, bool isClosed) external onlyOwner {
-        holidayClosures[dateKey] = isClosed;
-        emit HolidayClosureUpdated(dateKey, isClosed);
+    function setCalendarClosure(MarketCalendar calendarType, uint256 dateKey, bool isClosed)
+        external
+        onlyRole(RISK_MANAGER_ROLE)
+    {
+        calendarClosures[uint8(calendarType)][dateKey] = isClosed;
+        emit CalendarClosureUpdated(uint8(calendarType), dateKey, isClosed);
     }
 
     function quotePremium(
@@ -179,7 +185,7 @@ contract PricingOracle is IPricingEngine {
         uint256 payoutCap,
         uint256 utilizationBpsValue,
         bool isDownsideProtection
-    ) external view returns (PremiumQuote memory quote) {
+    ) external view override whenNotPaused returns (PremiumQuote memory quote) {
         MarketConfig storage config = marketConfigs[symbol];
         if (!config.isActive) revert MarketInactive(symbol);
         if (duration < config.minDuration || duration > config.maxDuration) revert InvalidDuration();
@@ -187,6 +193,7 @@ contract PricingOracle is IPricingEngine {
         if (utilizationBpsValue > BPS) revert InvalidUtilization();
         if (triggerBps < config.minTriggerBps || triggerBps > config.maxTriggerBps) revert InvalidTrigger();
         if (payoutCap == 0 || payoutCap > notional || deductible >= payoutCap) revert InvalidPayoutTerms();
+
         SessionContext memory currentSession = _sessionContext(config, block.timestamp);
         if (config.enforceMarketHours && !currentSession.isOpen) revert MarketClosed(symbol);
         if (config.enforceMarketHours && config.closeBufferMinutes > 0) {
@@ -258,7 +265,7 @@ contract PricingOracle is IPricingEngine {
         });
     }
 
-    function getSpotPrice(bytes32 symbol) external view returns (uint256) {
+    function getSpotPrice(bytes32 symbol) external view override returns (uint256) {
         MarketConfig storage config = marketConfigs[symbol];
         if (!config.isActive) revert MarketInactive(symbol);
         return _readSpotOracle(symbol, config.allowFallbackOracle).price;
@@ -267,6 +274,7 @@ contract PricingOracle is IPricingEngine {
     function getSettlementPrice(bytes32 symbol, uint256 scheduledExpiry)
         external
         view
+        override
         returns (uint256 price, uint256 effectiveTimestamp)
     {
         MarketConfig storage config = marketConfigs[symbol];
@@ -306,7 +314,7 @@ contract PricingOracle is IPricingEngine {
         );
     }
 
-    function isMarketOpen(bytes32 symbol) external view returns (bool) {
+    function isMarketOpen(bytes32 symbol) external view override returns (bool) {
         MarketConfig storage config = marketConfigs[symbol];
         if (!config.isActive) {
             return false;
@@ -314,7 +322,7 @@ contract PricingOracle is IPricingEngine {
         return _sessionContext(config, block.timestamp).isOpen;
     }
 
-    function isSupportedSymbol(bytes32 symbol) external view returns (bool) {
+    function isSupportedSymbol(bytes32 symbol) external view override returns (bool) {
         return marketConfigs[symbol].isActive;
     }
 
@@ -352,12 +360,8 @@ contract PricingOracle is IPricingEngine {
         pure
         returns (uint256 multiplierBps)
     {
-        if (duration <= SHORT_TERM_MAX) {
-            return snapshot.shortTermMultiplierBps;
-        }
-        if (duration <= MEDIUM_TERM_MAX) {
-            return snapshot.mediumTermMultiplierBps;
-        }
+        if (duration <= SHORT_TERM_MAX) return snapshot.shortTermMultiplierBps;
+        if (duration <= MEDIUM_TERM_MAX) return snapshot.mediumTermMultiplierBps;
         multiplierBps = snapshot.longTermMultiplierBps;
     }
 
@@ -366,7 +370,7 @@ contract PricingOracle is IPricingEngine {
         view
         returns (uint256 effectiveTimestamp)
     {
-        if (config.settlementMode == SettlementMode.CurrentPrice || !config.useUsEquityCalendar) {
+        if (config.settlementMode == SettlementMode.CurrentPrice) {
             return scheduledExpiry;
         }
 
@@ -383,7 +387,7 @@ contract PricingOracle is IPricingEngine {
         SessionContext memory currentSession,
         uint256 scheduledExpiry
     ) internal view returns (bool) {
-        if (!config.useUsEquityCalendar) {
+        if (config.calendarType == MarketCalendar.None) {
             return false;
         }
 
@@ -405,18 +409,10 @@ contract PricingOracle is IPricingEngine {
         view
         returns (SessionContext memory context)
     {
-        if (!config.useUsEquityCalendar) {
+        if (config.calendarType == MarketCalendar.None) {
             uint256 dayOfWeekUtc = ((timestamp / DAY) + 4) % 7;
             if (dayOfWeekUtc == 0 || dayOfWeekUtc == 6) {
-                return SessionContext({
-                    isOpen: false,
-                    isHoliday: false,
-                    minutesLocal: 0,
-                    openTimestamp: 0,
-                    closeTimestamp: 0,
-                    nextOpenTimestamp: 0,
-                    localDateKey: 0
-                });
+                return SessionContext(false, false, 0, 0, 0, 0, 0);
             }
 
             uint256 minutesUtc = (timestamp % DAY) / 1 minutes;
@@ -433,10 +429,11 @@ contract PricingOracle is IPricingEngine {
             });
         }
 
-        (uint256 year, uint256 month, uint256 day, uint256 minutesLocal, uint256 offsetSeconds) = _localDateTime(timestamp);
+        (uint256 year, uint256 month, uint256 day, uint256 minutesLocal, int256 offsetSeconds) =
+            _localDateTime(config.calendarType, timestamp);
         uint256 dateKey = (year * 10_000) + (month * 100) + day;
         uint256 weekday = _getDayOfWeek(year, month, day);
-        bool isHoliday = holidayClosures[dateKey];
+        bool isHoliday = calendarClosures[uint8(config.calendarType)][dateKey];
         bool isWeekend = weekday == 0 || weekday == 6;
         bool isOpen = !isHoliday &&
             !isWeekend &&
@@ -460,11 +457,12 @@ contract PricingOracle is IPricingEngine {
         uint256 cursor = timestamp;
 
         for (uint256 i = 0; i < 10; i++) {
-            (uint256 year, uint256 month, uint256 day,, uint256 offsetSeconds) = _localDateTime(cursor);
+            (uint256 year, uint256 month, uint256 day,, int256 offsetSeconds) =
+                _localDateTime(config.calendarType, cursor);
             uint256 dateKey = (year * 10_000) + (month * 100) + day;
             uint256 weekday = _getDayOfWeek(year, month, day);
 
-            if (weekday != 0 && weekday != 6 && !holidayClosures[dateKey]) {
+            if (weekday != 0 && weekday != 6 && !calendarClosures[uint8(config.calendarType)][dateKey]) {
                 uint256 dayStartUtc = _dayStartUtc(cursor, offsetSeconds);
                 openTimestamp = dayStartUtc + (uint256(config.openMinutesLocal) * 1 minutes);
                 if (openTimestamp >= timestamp) {
@@ -476,19 +474,31 @@ contract PricingOracle is IPricingEngine {
         }
     }
 
-    function _dayStartUtc(uint256 timestamp, uint256 offsetSeconds) internal pure returns (uint256) {
-        return (((timestamp - offsetSeconds) / DAY) * DAY) + offsetSeconds;
+    function _dayStartUtc(uint256 timestamp, int256 offsetSeconds) internal pure returns (uint256) {
+        int256 localTimestamp = int256(timestamp) + offsetSeconds;
+        int256 dayStartLocal = (localTimestamp / int256(DAY)) * int256(DAY);
+        return uint256(dayStartLocal - offsetSeconds);
     }
 
-    function _localDateTime(uint256 timestamp)
+    function _localDateTime(MarketCalendar calendarType, uint256 timestamp)
         internal
         pure
-        returns (uint256 year, uint256 month, uint256 day, uint256 minutesLocal, uint256 offsetSeconds)
+        returns (uint256 year, uint256 month, uint256 day, uint256 minutesLocal, int256 offsetSeconds)
     {
-        offsetSeconds = _isUsDaylightSaving(timestamp) ? EASTERN_DAYLIGHT_OFFSET : EASTERN_STANDARD_OFFSET;
-        uint256 localTimestamp = timestamp - offsetSeconds;
-        (year, month, day) = _daysToDate(localTimestamp / DAY);
-        minutesLocal = (localTimestamp % DAY) / 1 minutes;
+        offsetSeconds = _calendarOffsetSeconds(calendarType, timestamp);
+        int256 localTimestamp = int256(timestamp) + offsetSeconds;
+        (year, month, day) = _daysToDate(uint256(localTimestamp / int256(DAY)));
+        minutesLocal = uint256(localTimestamp % int256(DAY)) / 1 minutes;
+    }
+
+    function _calendarOffsetSeconds(MarketCalendar calendarType, uint256 timestamp) internal pure returns (int256) {
+        if (calendarType == MarketCalendar.UsEquity) {
+            return _isUsDaylightSaving(timestamp) ? -int256(US_DAYLIGHT_ABS_OFFSET) : -int256(US_STANDARD_ABS_OFFSET);
+        }
+        if (calendarType == MarketCalendar.HongKongEquity) {
+            return int256(HONG_KONG_OFFSET);
+        }
+        return 0;
     }
 
     function _isUsDaylightSaving(uint256 timestamp) internal pure returns (bool) {

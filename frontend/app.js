@@ -258,6 +258,7 @@ async function loadPolicies() {
   const policyIds = await state.contracts.policyFactory.getPoliciesByHolder(state.account);
   if (policyIds.length === 0) {
     el.policiesOutput.textContent = "No policies for current wallet.";
+    log("No policies found for current wallet.");
     return;
   }
 

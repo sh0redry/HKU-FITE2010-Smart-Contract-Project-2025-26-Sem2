@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stock Hedge Admin Console</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <nav class="topnav">
+      <a href="./index.html">Manual Test</a>
+      <a href="./simulation.html">Scenario Simulator</a>
+      <a class="active" href="./admin.html">Admin Console</a>
+    </nav>
+
+    <section class="hero">
+      <p class="eyebrow">Operations Console</p>
+      <h1>Governance, monitoring, and market configuration</h1>
+      <p class="lede">
+        This page is for `governor`, `riskManager`, `oracleManager`, and `pauser` wallets. Use it to monitor vault and exposure
+        state, pause underwriting, adjust risk limits, govern supported markets, and manage calendar closures.
+      </p>
+      <button id="connectButton">Connect Wallet</button>
+      <p id="walletStatus" class="muted">Wallet not connected.</p>
+      <div class="pill-list" id="roleHints"></div>
+    </section>
+
+    <section class="card">
+      <h2>Contract Addresses</h2>
+      <div class="form-grid">
+        <label>Policy Factory <input id="policyFactoryAddress" placeholder="0x..." /></label>
+        <label>Insurance Vault <input id="vaultAddress" placeholder="0x..." /></label>
+        <label>Pricing Oracle <input id="oracleAddress" placeholder="0x..." /></label>
+      </div>
+      <button id="loadContractsButton">Load Contracts</button>
+      <p class="muted">If `frontend/deployments/localhost.json` exists, addresses and suggested admin accounts will preload.</p>
+    </section>
+
+    <section class="grid-wide">
+      <section class="card">
+        <h2>Monitoring</h2>
+        <div class="form-grid">
+          <label>Monitor Symbol
+            <select id="monitorSymbol">
+              <option value="AAPL">AAPL</option>
+              <option value="TSLA">TSLA</option>
+              <option value="NVDA">NVDA</option>
+              <option value="MSFT">MSFT</option>
+              <option value="0700HK">0700HK</option>
+              <option value="9988HK">9988HK</option>
+              <option value="0005HK">0005HK</option>
+            </select>
+          </label>
+        </div>
+        <button id="refreshDashboardButton">Refresh Dashboard</button>
+        <pre id="dashboardOutput">Dashboard not loaded.</pre>
+      </section>
+
+      <section class="card">
+        <h2>Pause Controls</h2>
+        <div class="form-grid">
+          <label>Underwriting Pause Reason <input id="pauseReasonInput" value="ADMIN_PAUSE" /></label>
+          <label>Calendar Date Key <input id="closureDateInput" type="number" value="20260101" /></label>
+          <label>Calendar
+            <select id="calendarTypeInput">
+              <option value="1">US Equity</option>
+              <option value="2">Hong Kong Equity</option>
+            </select>
+          </label>
+          <label>Closed
+            <select id="closureStateInput">
+              <option value="true">Closed</option>
+              <option value="false">Open</option>
+            </select>
+          </label>
+        </div>
+        <div class="actions">
+          <button id="pauseUnderwritingButton">Pause Underwriting</button>
+          <button id="unpauseUnderwritingButton">Unpause Underwriting</button>
+          <button id="pauseQuotingButton">Pause Quoting</button>
+          <button id="unpauseQuotingButton">Unpause Quoting</button>
+          <button id="setCalendarClosureButton">Set Calendar Closure</button>
+        </div>
+      </section>
+    </section>
+
+    <section class="grid">
+      <section class="card">
+        <h2>Risk Limits</h2>
+        <div class="form-grid">
+          <label>Max Utilization Bps <input id="maxUtilizationInput" type="number" value="9000" /></label>
+          <label>Emergency Pause Bps <input id="emergencyUtilizationInput" type="number" value="8500" /></label>
+          <label>Minimum Buffer (USDC) <input id="minBufferInput" type="number" value="0" /></label>
+          <label>Max Downside Exposure (USDC) <input id="maxDownsideInput" type="number" value="1000000" /></label>
+          <label>Max Upside Exposure (USDC) <input id="maxUpsideInput" type="number" value="1000000" /></label>
+          <label>Max Short Term Exposure (USDC) <input id="maxShortInput" type="number" value="1000000" /></label>
+          <label>Max Medium Term Exposure (USDC) <input id="maxMediumInput" type="number" value="1000000" /></label>
+          <label>Max Long Term Exposure (USDC) <input id="maxLongInput" type="number" value="1000000" /></label>
+        </div>
+        <button id="configureRiskButton">Update Risk Limits</button>
+      </section>
+
+      <section class="card">
+        <h2>Symbol Exposure Limit</h2>
+        <div class="form-grid">
+          <label>Symbol
+            <select id="limitSymbolInput">
+              <option value="AAPL">AAPL</option>
+              <option value="TSLA">TSLA</option>
+              <option value="NVDA">NVDA</option>
+              <option value="MSFT">MSFT</option>
+              <option value="0700HK">0700HK</option>
+              <option value="9988HK">9988HK</option>
+              <option value="0005HK">0005HK</option>
+            </select>
+          </label>
+          <label>Exposure Limit (USDC) <input id="symbolLimitInput" type="number" value="250000" /></label>
+        </div>
+        <button id="setSymbolLimitButton">Set Symbol Limit</button>
+      </section>
+    </section>
+
+    <section class="card">
+      <h2>Market Governance</h2>
+      <div class="form-grid">
+        <label>Symbol
+          <select id="marketSymbolInput">
+            <option value="AAPL">AAPL</option>
+            <option value="TSLA">TSLA</option>
+            <option value="NVDA">NVDA</option>
+            <option value="MSFT">MSFT</option>
+            <option value="0700HK">0700HK</option>
+            <option value="9988HK">9988HK</option>
+            <option value="0005HK">0005HK</option>
+          </select>
+        </label>
+        <label>Base Premium Bps <input id="basePremiumInput" type="number" value="150" /></label>
+        <label>Max Notional (USDC) <input id="maxNotionalInput" type="number" value="50000" /></label>
+        <label>Min Trigger Bps <input id="minTriggerInput" type="number" value="500" /></label>
+        <label>Max Trigger Bps <input id="maxTriggerInput" type="number" value="2000" /></label>
+        <label>Open Minutes Local <input id="openMinutesInput" type="number" value="570" /></label>
+        <label>Close Minutes Local <input id="closeMinutesInput" type="number" value="960" /></label>
+        <label>Close Buffer Minutes <input id="closeBufferInput" type="number" value="15" /></label>
+        <label>Overnight Gap Surcharge Bps <input id="overnightGapInput" type="number" value="120" /></label>
+        <label>Calendar
+          <select id="marketCalendarInput">
+            <option value="1">US Equity</option>
+            <option value="2">Hong Kong Equity</option>
+            <option value="0">Always Open Demo</option>
+          </select>
+        </label>
+        <label>Settlement Mode
+          <select id="settlementModeInput">
+            <option value="0">Current Price</option>
+            <option value="1">Next Market Open</option>
+          </select>
+        </label>
+        <label>Enforce Market Hours
+          <select id="enforceHoursInput">
+            <option value="false">No</option>
+            <option value="true">Yes</option>
+          </select>
+        </label>
+        <label>Allow Fallback Oracle
+          <select id="allowFallbackInput">
+            <option value="true">Yes</option>
+            <option value="false">No</option>
+          </select>
+        </label>
+        <label>Active
+          <select id="marketActiveInput">
+            <option value="true">Yes</option>
+            <option value="false">No</option>
+          </select>
+        </label>
+      </div>
+      <button id="configureMarketButton">Configure Market</button>
+    </section>
+
+    <section class="card">
+      <h2>Oracle Wiring</h2>
+      <div class="form-grid">
+        <label>Risk Parameter Provider <input id="riskProviderInput" placeholder="0x..." /></label>
+        <label>Oracle Adapter <input id="oracleAdapterInput" placeholder="0x..." /></label>
+      </div>
+      <div class="actions">
+        <button id="setRiskProviderButton">Set Risk Provider</button>
+        <button id="setOracleAdapterButton">Set Oracle Adapter</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Activity</h2>
+      <pre id="logOutput">Ready.</pre>
+    </section>
+  </main>
+
+  <script type="module" src="./admin.js"></script>
+</body>
+</html>
