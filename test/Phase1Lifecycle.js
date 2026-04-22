@@ -747,6 +747,39 @@ describe("Phase 8 Governance And Multi-Market Lifecycle", function () {
     expect(policy.symbol).to.equal(HK_0700);
   });
 
+  it("treats the Hong Kong lunch recess as a closed window and reopens at 13:00 HKT", async function () {
+    const { pricingOracle, policyFactory } = await loadFixture(deployFixture);
+    const hkNotional = ethers.parseUnits("1000", USDC_DECIMALS);
+    const hkPayoutCap = ethers.parseUnits("500", USDC_DECIMALS);
+
+    await time.increaseTo(utcTimestamp(2026, 6, 15, 2, 30));
+    expect(await pricingOracle.isMarketOpen(HK_0700)).to.equal(true);
+
+    const morningSession = await pricingOracle.getSessionWindow(HK_0700, utcTimestamp(2026, 6, 15, 2, 30));
+    expect(morningSession.isOpen).to.equal(true);
+    expect(morningSession.closeTimestamp).to.equal(utcTimestamp(2026, 6, 15, 4, 0));
+    expect(morningSession.nextOpenTimestamp).to.equal(utcTimestamp(2026, 6, 15, 5, 0));
+
+    await time.increaseTo(utcTimestamp(2026, 6, 15, 4, 30));
+    expect(await pricingOracle.isMarketOpen(HK_0700)).to.equal(false);
+
+    const lunchSession = await pricingOracle.getSessionWindow(HK_0700, utcTimestamp(2026, 6, 15, 4, 30));
+    expect(lunchSession.isOpen).to.equal(false);
+    expect(lunchSession.nextOpenTimestamp).to.equal(utcTimestamp(2026, 6, 15, 5, 0));
+
+    await expect(
+      policyFactory.previewPolicy(HK_0700, true, hkNotional, 24 * 3600, 1000, 0, hkPayoutCap)
+    ).to.be.revertedWithCustomError(pricingOracle, "MarketClosed");
+
+    await time.increaseTo(utcTimestamp(2026, 6, 15, 6, 0));
+    expect(await pricingOracle.isMarketOpen(HK_0700)).to.equal(true);
+
+    const afternoonSession = await pricingOracle.getSessionWindow(HK_0700, utcTimestamp(2026, 6, 15, 6, 0));
+    expect(afternoonSession.isOpen).to.equal(true);
+    expect(afternoonSession.openTimestamp).to.equal(utcTimestamp(2026, 6, 15, 5, 0));
+    expect(afternoonSession.closeTimestamp).to.equal(utcTimestamp(2026, 6, 15, 8, 0));
+  });
+
   it("treats configured US holidays as closed market days", async function () {
     const { pricingOracle, policyFactory, baseConfig, oracleAdapter } = await loadFixture(deployFixture);
     const IBM = ethers.encodeBytes32String("IBM");

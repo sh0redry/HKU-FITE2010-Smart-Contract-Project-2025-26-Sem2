@@ -15,6 +15,8 @@ contract PricingOracle is IPricingEngine, AccessControl, Pausable {
     uint256 private constant SHORT_TERM_MAX = 7 days;
     uint256 private constant MEDIUM_TERM_MAX = 21 days;
     uint256 private constant HONG_KONG_OFFSET = 8 hours;
+    uint256 private constant HONG_KONG_LUNCH_START = 12 hours;
+    uint256 private constant HONG_KONG_LUNCH_END = 13 hours;
     uint256 private constant US_STANDARD_ABS_OFFSET = 5 hours;
     uint256 private constant US_DAYLIGHT_ABS_OFFSET = 4 hours;
 
@@ -70,7 +72,8 @@ contract PricingOracle is IPricingEngine, AccessControl, Pausable {
         bool isHoliday;
         uint256 minutesLocal;
         uint256 openTimestamp;
-        uint256 closeTimestamp;
+        uint256 sessionCloseTimestamp;
+        uint256 marketCloseTimestamp;
         uint256 nextOpenTimestamp;
         uint256 localDateKey;
     }
@@ -197,8 +200,8 @@ contract PricingOracle is IPricingEngine, AccessControl, Pausable {
         SessionContext memory currentSession = _sessionContext(config, block.timestamp);
         if (config.enforceMarketHours && !currentSession.isOpen) revert MarketClosed(symbol);
         if (config.enforceMarketHours && config.closeBufferMinutes > 0) {
-            if (currentSession.closeTimestamp <= block.timestamp) revert MarketClosingSoon(symbol);
-            uint256 minutesUntilClose = (currentSession.closeTimestamp - block.timestamp) / 1 minutes;
+            if (currentSession.sessionCloseTimestamp <= block.timestamp) revert MarketClosingSoon(symbol);
+            uint256 minutesUntilClose = (currentSession.sessionCloseTimestamp - block.timestamp) / 1 minutes;
             if (minutesUntilClose <= config.closeBufferMinutes) revert MarketClosingSoon(symbol);
         }
 
@@ -309,7 +312,7 @@ contract PricingOracle is IPricingEngine, AccessControl, Pausable {
             session.localDateKey,
             session.minutesLocal,
             session.openTimestamp,
-            session.closeTimestamp,
+            session.sessionCloseTimestamp,
             session.nextOpenTimestamp
         );
     }
@@ -391,7 +394,7 @@ contract PricingOracle is IPricingEngine, AccessControl, Pausable {
             return false;
         }
 
-        return scheduledExpiry > currentSession.closeTimestamp;
+        return scheduledExpiry > currentSession.marketCloseTimestamp;
     }
 
     function _readSpotOracle(bytes32 symbol, bool allowFallback)
@@ -412,18 +415,21 @@ contract PricingOracle is IPricingEngine, AccessControl, Pausable {
         if (config.calendarType == MarketCalendar.None) {
             uint256 dayOfWeekUtc = ((timestamp / DAY) + 4) % 7;
             if (dayOfWeekUtc == 0 || dayOfWeekUtc == 6) {
-                return SessionContext(false, false, 0, 0, 0, 0, 0);
+                return SessionContext(false, false, 0, 0, 0, 0, 0, 0);
             }
 
             uint256 minutesUtc = (timestamp % DAY) / 1 minutes;
             bool open = minutesUtc >= config.openMinutesLocal && minutesUtc < config.closeMinutesLocal;
+            uint256 openTimestampUtc = (timestamp / DAY) * DAY + (uint256(config.openMinutesLocal) * 1 minutes);
+            uint256 closeTimestampUtc = (timestamp / DAY) * DAY + (uint256(config.closeMinutesLocal) * 1 minutes);
 
             return SessionContext({
                 isOpen: open,
                 isHoliday: false,
                 minutesLocal: minutesUtc,
-                openTimestamp: (timestamp / DAY) * DAY + (uint256(config.openMinutesLocal) * 1 minutes),
-                closeTimestamp: (timestamp / DAY) * DAY + (uint256(config.closeMinutesLocal) * 1 minutes),
+                openTimestamp: openTimestampUtc,
+                sessionCloseTimestamp: closeTimestampUtc,
+                marketCloseTimestamp: closeTimestampUtc,
                 nextOpenTimestamp: (timestamp / DAY) * DAY + DAY + (uint256(config.openMinutesLocal) * 1 minutes),
                 localDateKey: 0
             });
@@ -435,19 +441,110 @@ contract PricingOracle is IPricingEngine, AccessControl, Pausable {
         uint256 weekday = _getDayOfWeek(year, month, day);
         bool isHoliday = calendarClosures[uint8(config.calendarType)][dateKey];
         bool isWeekend = weekday == 0 || weekday == 6;
-        bool isOpen = !isHoliday &&
-            !isWeekend &&
-            minutesLocal >= config.openMinutesLocal &&
-            minutesLocal < config.closeMinutesLocal;
-
         uint256 dayStartUtc = _dayStartUtc(timestamp, offsetSeconds);
+        uint256 openTimestamp = dayStartUtc + (uint256(config.openMinutesLocal) * 1 minutes);
+        uint256 marketCloseTimestamp = dayStartUtc + (uint256(config.closeMinutesLocal) * 1 minutes);
+
+        if (isHoliday || isWeekend) {
+            return SessionContext({
+                isOpen: false,
+                isHoliday: isHoliday,
+                minutesLocal: minutesLocal,
+                openTimestamp: openTimestamp,
+                sessionCloseTimestamp: marketCloseTimestamp,
+                marketCloseTimestamp: marketCloseTimestamp,
+                nextOpenTimestamp: _nextSessionOpen(config, timestamp + 1),
+                localDateKey: dateKey
+            });
+        }
+
+        if (config.calendarType == MarketCalendar.HongKongEquity) {
+            return _hongKongSessionContext(config, timestamp, minutesLocal, dayStartUtc, dateKey);
+        }
 
         context = SessionContext({
-            isOpen: isOpen,
+            isOpen: minutesLocal >= config.openMinutesLocal && minutesLocal < config.closeMinutesLocal,
             isHoliday: isHoliday,
             minutesLocal: minutesLocal,
-            openTimestamp: dayStartUtc + (uint256(config.openMinutesLocal) * 1 minutes),
-            closeTimestamp: dayStartUtc + (uint256(config.closeMinutesLocal) * 1 minutes),
+            openTimestamp: openTimestamp,
+            sessionCloseTimestamp: marketCloseTimestamp,
+            marketCloseTimestamp: marketCloseTimestamp,
+            nextOpenTimestamp: _nextSessionOpen(config, timestamp + 1),
+            localDateKey: dateKey
+        });
+    }
+
+    function _hongKongSessionContext(
+        MarketConfig storage config,
+        uint256 timestamp,
+        uint256 minutesLocal,
+        uint256 dayStartUtc,
+        uint256 dateKey
+    ) internal view returns (SessionContext memory context) {
+        uint256 morningOpenTimestamp = dayStartUtc + (uint256(config.openMinutesLocal) * 1 minutes);
+        uint256 lunchStartTimestamp = dayStartUtc + HONG_KONG_LUNCH_START;
+        uint256 lunchEndTimestamp = dayStartUtc + HONG_KONG_LUNCH_END;
+        uint256 marketCloseTimestamp = dayStartUtc + (uint256(config.closeMinutesLocal) * 1 minutes);
+
+        if (minutesLocal < config.openMinutesLocal) {
+            return SessionContext({
+                isOpen: false,
+                isHoliday: false,
+                minutesLocal: minutesLocal,
+                openTimestamp: morningOpenTimestamp,
+                sessionCloseTimestamp: lunchStartTimestamp,
+                marketCloseTimestamp: marketCloseTimestamp,
+                nextOpenTimestamp: morningOpenTimestamp,
+                localDateKey: dateKey
+            });
+        }
+
+        if (minutesLocal < HONG_KONG_LUNCH_START / 1 minutes) {
+            return SessionContext({
+                isOpen: true,
+                isHoliday: false,
+                minutesLocal: minutesLocal,
+                openTimestamp: morningOpenTimestamp,
+                sessionCloseTimestamp: lunchStartTimestamp,
+                marketCloseTimestamp: marketCloseTimestamp,
+                nextOpenTimestamp: lunchEndTimestamp,
+                localDateKey: dateKey
+            });
+        }
+
+        if (minutesLocal < HONG_KONG_LUNCH_END / 1 minutes) {
+            return SessionContext({
+                isOpen: false,
+                isHoliday: false,
+                minutesLocal: minutesLocal,
+                openTimestamp: lunchEndTimestamp,
+                sessionCloseTimestamp: lunchEndTimestamp,
+                marketCloseTimestamp: marketCloseTimestamp,
+                nextOpenTimestamp: lunchEndTimestamp,
+                localDateKey: dateKey
+            });
+        }
+
+        if (minutesLocal < config.closeMinutesLocal) {
+            return SessionContext({
+                isOpen: true,
+                isHoliday: false,
+                minutesLocal: minutesLocal,
+                openTimestamp: lunchEndTimestamp,
+                sessionCloseTimestamp: marketCloseTimestamp,
+                marketCloseTimestamp: marketCloseTimestamp,
+                nextOpenTimestamp: _nextSessionOpen(config, marketCloseTimestamp + 1),
+                localDateKey: dateKey
+            });
+        }
+
+        context = SessionContext({
+            isOpen: false,
+            isHoliday: false,
+            minutesLocal: minutesLocal,
+            openTimestamp: morningOpenTimestamp,
+            sessionCloseTimestamp: marketCloseTimestamp,
+            marketCloseTimestamp: marketCloseTimestamp,
             nextOpenTimestamp: _nextSessionOpen(config, timestamp + 1),
             localDateKey: dateKey
         });
@@ -457,16 +554,29 @@ contract PricingOracle is IPricingEngine, AccessControl, Pausable {
         uint256 cursor = timestamp;
 
         for (uint256 i = 0; i < 10; i++) {
-            (uint256 year, uint256 month, uint256 day,, int256 offsetSeconds) =
+            (uint256 year, uint256 month, uint256 day, uint256 minutesLocal, int256 offsetSeconds) =
                 _localDateTime(config.calendarType, cursor);
             uint256 dateKey = (year * 10_000) + (month * 100) + day;
             uint256 weekday = _getDayOfWeek(year, month, day);
 
             if (weekday != 0 && weekday != 6 && !calendarClosures[uint8(config.calendarType)][dateKey]) {
                 uint256 dayStartUtc = _dayStartUtc(cursor, offsetSeconds);
-                openTimestamp = dayStartUtc + (uint256(config.openMinutesLocal) * 1 minutes);
-                if (openTimestamp >= timestamp) {
-                    return openTimestamp;
+                uint256 dayOpenTimestamp = dayStartUtc + (uint256(config.openMinutesLocal) * 1 minutes);
+                if (config.calendarType == MarketCalendar.HongKongEquity) {
+                    uint256 lunchResumeTimestamp = dayStartUtc + HONG_KONG_LUNCH_END;
+
+                    if (minutesLocal < config.openMinutesLocal) {
+                        return dayOpenTimestamp;
+                    }
+                    if (minutesLocal < HONG_KONG_LUNCH_END / 1 minutes) {
+                        return lunchResumeTimestamp;
+                    }
+                } else if (dayOpenTimestamp >= timestamp) {
+                    return dayOpenTimestamp;
+                }
+
+                if (dayOpenTimestamp >= timestamp) {
+                    return dayOpenTimestamp;
                 }
             }
 

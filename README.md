@@ -155,7 +155,9 @@ The protocol does not allow policies to be bought when the relevant exchange is 
 
 - Hong Kong symbols use Hong Kong local market time
 - Hong Kong symbols are also restricted to their market session
-- the current implementation uses a simplified continuous session window rather than a split lunch break
+- Hong Kong equities use a split trading day with a lunch recess
+- the current implementation models a morning session from `09:30-12:00` HKT and an afternoon session from `13:00-16:00` HKT
+- policies cannot be quoted or bought during the `12:00-13:00` HKT lunch break
 
 ### Important note
 
@@ -466,7 +468,6 @@ This repository is much more structured than a throwaway demo, but it is still a
 Important current boundaries:
 
 - settlement uses the current allowed oracle spot at settlement time
-- Hong Kong lunch recess is not yet modeled
 - exchange calendars are simplified rather than fully production-grade
 - live production oracle credentials and real stablecoin integrations are not bundled in-repo
 - the system has not undergone an external professional audit
