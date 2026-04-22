@@ -25,10 +25,14 @@ contract PolicySettlementAutomation is IAutomationCompatible {
         uint256[] memory settleable = new uint256[](batch.length);
         uint256 count;
 
-        for (uint256 i = 0; i < batch.length; i++) {
+        uint256 batchLength = batch.length;
+        for (uint256 i = 0; i < batchLength;) {
             if (policyFactory.isPolicySettleable(batch[i])) {
                 settleable[count] = batch[i];
                 count++;
+            }
+            unchecked {
+                ++i;
             }
         }
 
@@ -37,8 +41,11 @@ contract PolicySettlementAutomation is IAutomationCompatible {
         }
 
         uint256[] memory result = new uint256[](count);
-        for (uint256 i = 0; i < count; i++) {
+        for (uint256 i = 0; i < count;) {
             result[i] = settleable[i];
+            unchecked {
+                ++i;
+            }
         }
 
         upkeepNeeded = true;

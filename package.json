@@ -5,8 +5,16 @@
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test",
+    "test:unit": "hardhat test test/unit/InsuranceVault.unit.js test/unit/PricingOracle.unit.js",
+    "test:integration": "hardhat test test/integration/SystemIntegration.js",
+    "test:fuzz": "hardhat test test/fuzz/PolicyFactory.fuzz.js",
+    "test:stress": "hardhat test test/stress/ExtremeMarketStress.js",
     "node": "hardhat node",
-    "deploy:local": "hardhat run scripts/deploy.js --network localhost"
+    "deploy:local": "hardhat run scripts/deploy-local.js --network localhost",
+    "deploy:demo": "hardhat run scripts/deploy-demo.js --network localhost",
+    "deploy:sepolia": "hardhat run scripts/deploy-testnet.js --network sepolia",
+    "deploy:base-sepolia": "hardhat run scripts/deploy-testnet.js --network baseSepolia",
+    "gas:report": "hardhat run scripts/gas-report.js"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",

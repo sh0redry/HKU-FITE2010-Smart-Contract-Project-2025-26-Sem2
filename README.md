@@ -11,6 +11,7 @@ The project now includes the Phase 4 pricing upgrade:
 - Phase 5 market logic adds U.S. equity session handling, DST-aware clocks, holiday closures, close-buffer purchase blocking, and next-open settlement rules
 - Phase 6 adds an oracle-adapter layer, a Chainlink-style price source path, fallback-oracle handling, and keeper-based automatic settlement
 - Phase 8 adds OpenZeppelin-based governance roles, a split buyer/admin frontend, and Hong Kong market support
+- Phase 10 adds a fuller release-prep layer with split test categories, gas tooling, multi-environment deployment scripts, and defense docs
 
 ## Architecture
 
@@ -49,9 +50,25 @@ The project now includes the Phase 4 pricing upgrade:
 - `contracts/mocks/StockHedgeDemoDeployer.sol`
   Deploys a ready-to-test Remix demo stack with U.S. and Hong Kong symbols plus seeded risk snapshots.
 - `scripts/deploy.js`
-  Deploys the local Hardhat stack, seeds balances, injects initial LP liquidity, configures market snapshots, and writes frontend addresses.
+  Deployment wrapper that writes the correct frontend deployment file for the current network.
+- `scripts/deploy-local.js`
+  Local deployment entrypoint for `frontend/deployments/localhost.json`.
+- `scripts/deploy-demo.js`
+  Demo deployment entrypoint for `frontend/deployments/demo.json`.
+- `scripts/deploy-testnet.js`
+  Testnet deployment entrypoint for `sepolia` and `base-sepolia`.
+- `scripts/gas-report.js`
+  Emits a simple gas snapshot for the highest-frequency protocol flows.
 - `test/Phase1Lifecycle.js`
   Hardhat regression suite covering lifecycle, vault accounting, multi-symbol support, cancellation, market-hours checks, and Phase 4 risk-based pricing behavior.
+- `test/unit/*`
+  Unit tests for vault accounting and pricing edge cases.
+- `test/integration/*`
+  Multi-contract system tests.
+- `test/fuzz/*`
+  Randomized parameter coverage for quote and policy invariants.
+- `test/stress/*`
+  Extreme-move and aggregate-reserve scenarios.
 
 ### Frontends
 
@@ -63,6 +80,16 @@ The project now includes the Phase 4 pricing upgrade:
   Manager-facing monitoring and governance console for vault health, pauses, risk limits, market configs, and calendar closures.
 - `frontend/shared.js`
   Shared frontend helper layer for chain detection, deployment-file loading, and custom error decoding.
+- `docs/SECURITY_CHECKLIST.md`
+  Practical review checklist for permissions, reentrancy, oracle handling, accounting, and precision risk.
+- `docs/DEPLOYMENT_GUIDE.md`
+  Local, demo, and testnet deployment instructions.
+- `docs/ARCHITECTURE.md`
+  Architecture overview and Mermaid diagrams.
+- `docs/DEFENSE_BRIEF.md`
+  Concise defense-ready explanation of the system and tradeoffs.
+- `docs/GAS_NOTES.md`
+  Notes on current gas optimizations and the gas-report workflow.
 
 ## Phase 4 pricing model
 
@@ -231,10 +258,14 @@ Premiums, reserves, and payouts are all denominated in `MockUSDC`.
 npm install
 ```
 
-2. Run the Hardhat regression suite:
+2. Run the full test matrix:
 
 ```bash
-npx hardhat test
+npm run test
+npm run test:unit
+npm run test:integration
+npm run test:fuzz
+npm run test:stress
 ```
 
 3. Start a local chain:
@@ -247,6 +278,12 @@ npm run node
 
 ```bash
 npm run deploy:local
+```
+
+Optional demo deployment:
+
+```bash
+npm run deploy:demo
 ```
 
 5. Import one of the Hardhat test accounts into MetaMask and connect MetaMask to:
@@ -279,6 +316,34 @@ You can use the included examples:
 
 - `frontend/deployments/sepolia.example.json`
 - `frontend/deployments/base-sepolia.example.json`
+
+## Phase 10 release-quality preparation
+
+The repository now includes:
+
+- split test commands for:
+  - regression
+  - unit
+  - integration
+  - fuzz
+  - stress
+- a lightweight gas report command
+- separate deployment entrypoints for:
+  - local
+  - demo
+  - sepolia
+  - base sepolia
+- written deployment, security, architecture, and defense documents
+
+Useful commands:
+
+```bash
+npm run gas:report
+npm run deploy:local
+npm run deploy:demo
+npm run deploy:sepolia
+npm run deploy:base-sepolia
+```
 
 ### Suggested local role usage
 
@@ -334,3 +399,11 @@ The current Hardhat suite covers:
 - role separation for governor, risk, oracle, and pauser duties
 - utilization validation above `100%`
 - underwriting result and LP share-price tracking after profitable underwriting
+
+Additional release-prep assets:
+
+- `docs/SECURITY_CHECKLIST.md`
+- `docs/DEPLOYMENT_GUIDE.md`
+- `docs/ARCHITECTURE.md`
+- `docs/DEFENSE_BRIEF.md`
+- `docs/GAS_NOTES.md`

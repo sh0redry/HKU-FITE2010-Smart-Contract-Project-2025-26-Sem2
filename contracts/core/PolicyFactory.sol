@@ -275,8 +275,12 @@ contract PolicyFactory is AccessControl, Pausable {
     }
 
     function settlePolicies(uint256[] calldata policyIds) external {
-        for (uint256 i = 0; i < policyIds.length; i++) {
+        uint256 length = policyIds.length;
+        for (uint256 i = 0; i < length;) {
             _settlePolicy(policyIds[i]);
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -318,8 +322,11 @@ contract PolicyFactory is AccessControl, Pausable {
         }
 
         ids = new uint256[](end - cursor);
-        for (uint256 i = cursor; i < end; i++) {
+        for (uint256 i = cursor; i < end;) {
             ids[i - cursor] = activePolicyIds[i];
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -406,9 +413,9 @@ contract PolicyFactory is AccessControl, Pausable {
     function _removeActivePolicy(uint256 policyId) internal {
         uint256 lastIndex = activePolicyIds.length - 1;
         uint256 removeIndex = activePolicyIndex[policyId];
+        uint256 movedPolicyId = activePolicyIds[lastIndex];
 
         if (removeIndex != lastIndex) {
-            uint256 movedPolicyId = activePolicyIds[lastIndex];
             activePolicyIds[removeIndex] = movedPolicyId;
             activePolicyIndex[movedPolicyId] = removeIndex;
         }

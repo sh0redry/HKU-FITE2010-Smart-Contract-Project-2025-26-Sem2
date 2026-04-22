@@ -3,8 +3,8 @@ const { deployStack } = require("./deploy-shared");
 
 async function main() {
   const output = await deployStack(hre, {
-    envLabel: hre.network.name === "localhost" ? "local" : "testnet",
-    outputName: `${hre.network.name}.json`
+    envLabel: "demo",
+    outputName: "demo.json"
   });
 
   console.log(JSON.stringify(output, null, 2));
