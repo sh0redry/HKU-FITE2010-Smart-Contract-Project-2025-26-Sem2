@@ -56,11 +56,13 @@ The project now includes the Phase 4 pricing upgrade:
 ### Frontends
 
 - `frontend/index.html`
-  Buyer-facing chain-connected page for quote, buy, cancel, settle, deposit, and withdraw flows.
+  Buyer-facing chain-connected page for quote, buy, cancel, settle, deposit, and withdraw flows, now with network-aware deployment loading, policy status tables, LP metrics, and quote visualizations.
 - `frontend/simulation.html`
   Off-chain scenario replay page that simulates one or more policies across sample stock-price paths and shows premium, payout, and protocol revenue.
 - `frontend/admin.html`
   Manager-facing monitoring and governance console for vault health, pauses, risk limits, market configs, and calendar closures.
+- `frontend/shared.js`
+  Shared frontend helper layer for chain detection, deployment-file loading, and custom error decoding.
 
 ## Phase 4 pricing model
 
@@ -256,6 +258,27 @@ npm run deploy:local
    - `frontend/simulation.html`
    - `frontend/admin.html`
 8. The manual page will try to auto-load addresses from `frontend/deployments/localhost.json`.
+
+## Phase 9 frontend upgrades
+
+The buyer frontend is now aimed at real network use instead of only a local static demo:
+
+- it detects the connected chain and tries to load the matching deployment file
+- it supports `localhost`, `Sepolia`, and `Base Sepolia` deployment-file conventions
+- it surfaces readable revert reasons by decoding custom Solidity errors
+- it groups policies into `Active / Expired / Settled / Cancelled`
+- it shows LP metrics such as TVL, utilization, withdrawable assets, and underwriting P&L
+- it visualizes spot, strike, volatility, probability, and premium components with canvas charts
+
+If you deploy to a real testnet, add one of these files:
+
+- `frontend/deployments/sepolia.json`
+- `frontend/deployments/base-sepolia.json`
+
+You can use the included examples:
+
+- `frontend/deployments/sepolia.example.json`
+- `frontend/deployments/base-sepolia.example.json`
 
 ### Suggested local role usage
 

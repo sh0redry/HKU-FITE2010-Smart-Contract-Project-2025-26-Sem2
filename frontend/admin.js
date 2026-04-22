@@ -1,4 +1,17 @@
 import { ethers } from "https://cdn.jsdelivr.net/npm/ethers@6.15.0/+esm";
+import {
+  policyFactoryAbi,
+  vaultAbi,
+  oracleAbi,
+  erc20Abi,
+  policyFactoryInterface,
+  vaultInterface,
+  oracleInterface,
+  erc20Interface,
+  detectNetwork,
+  loadDeploymentByChain,
+  decodeError
+} from "./shared.js";
 
 const state = {
   provider: null,
@@ -7,66 +20,9 @@ const state = {
   tokenDecimals: 6,
   tokenSymbol: "USDC",
   deployment: null,
+  network: null,
   contracts: {}
 };
-
-const policyFactoryAbi = [
-  "function paused() view returns (bool)",
-  "function underwritingPaused() view returns (bool)",
-  "function getActivePoliciesCount() view returns (uint256)",
-  "function maxUtilizationBps() view returns (uint256)",
-  "function emergencyPauseUtilizationBps() view returns (uint256)",
-  "function minimumLiquidityBuffer() view returns (uint256)",
-  "function maxDownsideExposure() view returns (uint256)",
-  "function maxUpsideExposure() view returns (uint256)",
-  "function maxShortTermExposure() view returns (uint256)",
-  "function maxMediumTermExposure() view returns (uint256)",
-  "function maxLongTermExposure() view returns (uint256)",
-  "function downsideExposure() view returns (uint256)",
-  "function upsideExposure() view returns (uint256)",
-  "function shortTermExposure() view returns (uint256)",
-  "function mediumTermExposure() view returns (uint256)",
-  "function longTermExposure() view returns (uint256)",
-  "function symbolExposure(bytes32 symbol) view returns (uint256)",
-  "function symbolExposureLimit(bytes32 symbol) view returns (uint256)",
-  "function configureRiskLimits(uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256)",
-  "function setSymbolExposureLimit(bytes32 symbol, uint256 newLimit)",
-  "function setUnderwritingPaused(bool paused, bytes32 reason)",
-  "function unpauseUnderwriting()"
-];
-
-const oracleAbi = [
-  "function paused() view returns (bool)",
-  "function riskParameterProvider() view returns (address)",
-  "function oracleAdapter() view returns (address)",
-  "function getSpotPrice(bytes32 symbol) view returns (uint256)",
-  "function isMarketOpen(bytes32 symbol) view returns (bool)",
-  "function getSessionWindow(bytes32 symbol, uint256 timestamp) view returns (bool,bool,uint256,uint256,uint256,uint256,uint256)",
-  "function configureMarket(bytes32 symbol, (uint256 minDuration,uint256 maxDuration,uint256 basePremiumBps,uint256 maxNotional,uint16 minTriggerBps,uint16 maxTriggerBps,uint16 openMinutesLocal,uint16 closeMinutesLocal,uint16 closeBufferMinutes,uint16 overnightGapSurchargeBps,bool enforceMarketHours,bool allowFallbackOracle,uint8 settlementMode,uint8 calendarType,bool isActive) config)",
-  "function setCalendarClosure(uint8 calendarType, uint256 dateKey, bool isClosed)",
-  "function setRiskParameterProvider(address newProvider)",
-  "function setOracleAdapter(address newAdapter)",
-  "function pauseQuoting()",
-  "function unpauseQuoting()"
-];
-
-const vaultAbi = [
-  "function settlementAsset() view returns (address)",
-  "function totalAssets() view returns (uint256)",
-  "function totalReserved() view returns (uint256)",
-  "function utilizationBps() view returns (uint256)",
-  "function availableLiquidity() view returns (uint256)",
-  "function totalShares() view returns (uint256)",
-  "function realizedPremiums() view returns (uint256)",
-  "function totalClaimsPaid() view returns (uint256)",
-  "function sharePrice() view returns (uint256)",
-  "function netUnderwritingResult() view returns (int256)"
-];
-
-const erc20Abi = [
-  "function decimals() view returns (uint8)",
-  "function symbol() view returns (string)"
-];
 
 const el = {
   connectButton: document.getElementById("connectButton"),
@@ -163,7 +119,19 @@ async function connectWallet() {
   await state.provider.send("eth_requestAccounts", []);
   state.signer = await state.provider.getSigner();
   state.account = await state.signer.getAddress();
-  el.walletStatus.textContent = `Connected: ${state.account}`;
+  state.network = await detectNetwork(state.provider);
+  el.walletStatus.textContent = `Connected: ${state.account} on ${state.network.chainName}`;
+
+  const deploymentResult = await loadDeploymentByChain(state.network.chainId);
+  if (deploymentResult) {
+    state.deployment = deploymentResult.deployment;
+    el.policyFactoryAddress.value = deploymentResult.deployment.contracts.policyFactory;
+    el.vaultAddress.value = deploymentResult.deployment.contracts.insuranceVault;
+    el.oracleAddress.value = deploymentResult.deployment.contracts.pricingOracle;
+    renderRoleHints();
+    log(`Loaded deployment addresses from ${deploymentResult.fileName}.`);
+  }
+
   log(`Wallet connected: ${state.account}`);
 }
 
@@ -456,7 +424,7 @@ async function run(action) {
   try {
     await action();
   } catch (error) {
-    const reason = error?.shortMessage || error?.reason || error?.message || "Unknown error";
+    const reason = decodeError(error, [policyFactoryInterface, oracleInterface, vaultInterface, erc20Interface]);
     log(`Error: ${reason}`);
   }
 }
@@ -481,14 +449,12 @@ run(async () => {
   }
 
   const response = await fetch("./deployments/localhost.json");
-  if (!response.ok) {
-    return;
+  if (response.ok) {
+    state.deployment = await response.json();
+    el.policyFactoryAddress.value = state.deployment.contracts.policyFactory;
+    el.vaultAddress.value = state.deployment.contracts.insuranceVault;
+    el.oracleAddress.value = state.deployment.contracts.pricingOracle;
+    renderRoleHints();
+    log("Loaded local deployment addresses and admin account hints.");
   }
-
-  state.deployment = await response.json();
-  el.policyFactoryAddress.value = state.deployment.contracts.policyFactory;
-  el.vaultAddress.value = state.deployment.contracts.insuranceVault;
-  el.oracleAddress.value = state.deployment.contracts.pricingOracle;
-  renderRoleHints();
-  log("Loaded local deployment addresses and admin account hints.");
 });

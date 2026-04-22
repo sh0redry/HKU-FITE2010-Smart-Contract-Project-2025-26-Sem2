@@ -20,8 +20,13 @@
         Connect a wallet, point to your deployed contracts, quote trigger-based insurance, buy coverage, cancel after
         the lock delay, settle after expiry, and inspect LP accounting across round-the-clock market coverage.
       </p>
+      <div class="hero-meta">
+        <span id="networkBadge" class="pill">No network</span>
+        <span id="deploymentStatus" class="muted">Connect a wallet to detect the current network.</span>
+      </div>
       <button id="connectButton">Connect Wallet</button>
       <p id="walletStatus" class="muted">Wallet not connected.</p>
+      <div id="txFeedback"></div>
     </section>
 
     <section class="card">
@@ -71,6 +76,13 @@
       </section>
 
       <section class="card">
+        <h2>Price & Risk Snapshot</h2>
+        <div id="quoteKpis" class="pill-list"></div>
+        <canvas id="priceRiskChart" width="520" height="210"></canvas>
+        <canvas id="quoteBreakdownChart" width="520" height="210"></canvas>
+      </section>
+
+      <section class="card">
         <h2>Policy Actions</h2>
         <label>Policy ID <input id="settlePolicyIdInput" type="number" min="1" step="1" /></label>
         <button id="settleButton">Settle</button>
@@ -87,8 +99,35 @@
         <label>Withdraw Shares <input id="withdrawInput" type="number" min="0" step="0.01" value="1000" /></label>
         <button id="withdrawButton">Withdraw</button>
         <button id="vaultStateButton">Refresh Vault</button>
+        <div id="lpSummary" class="pill-list"></div>
+        <canvas id="lpYieldChart" width="520" height="180"></canvas>
         <pre id="vaultOutput">Vault state unavailable.</pre>
       </section>
+    </section>
+
+    <section class="card">
+      <h2>Policy Portfolio</h2>
+      <div id="policySummary" class="pill-list"></div>
+      <div class="table-shell">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Symbol</th>
+              <th>Side</th>
+              <th>Status</th>
+              <th>Expiry</th>
+              <th>Notional</th>
+              <th>Premium</th>
+              <th>Payout</th>
+            </tr>
+          </thead>
+          <tbody id="policiesTableBody">
+            <tr><td colspan="8" class="table-empty">No policies loaded yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <pre id="policiesOutput">No policies loaded.</pre>
     </section>
 
     <section class="card">

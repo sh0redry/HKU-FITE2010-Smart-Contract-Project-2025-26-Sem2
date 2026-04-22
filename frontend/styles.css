@@ -65,6 +65,14 @@ body {
   margin-bottom: 20px;
 }
 
+.hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin: 16px 0;
+}
+
 .eyebrow {
   margin: 0 0 8px;
   text-transform: uppercase;
@@ -123,6 +131,45 @@ body {
   border: 1px solid rgba(187, 79, 29, 0.15);
 }
 
+#txFeedback {
+  margin-top: 16px;
+}
+
+.feedback {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(70, 51, 31, 0.12);
+  background: rgba(255, 251, 245, 0.88);
+}
+
+.feedback strong {
+  font-size: 15px;
+}
+
+.feedback a,
+.feedback span {
+  color: var(--accent-dark);
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.feedback-success {
+  border-color: rgba(47, 143, 87, 0.22);
+  background: rgba(228, 245, 234, 0.9);
+}
+
+.feedback-error {
+  border-color: rgba(191, 76, 76, 0.24);
+  background: rgba(252, 233, 229, 0.92);
+}
+
+.feedback-info {
+  border-color: rgba(89, 162, 195, 0.22);
+  background: rgba(229, 244, 249, 0.92);
+}
+
 label {
   display: block;
   margin: 12px 0;
@@ -132,7 +179,8 @@ label {
 input,
 select,
 button,
-pre {
+pre,
+canvas {
   width: 100%;
 }
 
@@ -179,6 +227,54 @@ pre {
   color: #fdf2e4;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+canvas {
+  margin-top: 14px;
+  border-radius: 16px;
+  background: #2d2115;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.table-shell {
+  overflow: auto;
+  border-radius: 18px;
+  border: 1px solid rgba(70, 51, 31, 0.12);
+  background: rgba(255, 251, 245, 0.72);
+  margin: 14px 0;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 780px;
+}
+
+.data-table th,
+.data-table td {
+  text-align: left;
+  padding: 14px 12px;
+  border-bottom: 1px solid rgba(70, 51, 31, 0.08);
+  font-size: 14px;
+}
+
+.data-table th {
+  color: var(--muted);
+  font-weight: 600;
+  background: rgba(255, 248, 240, 0.85);
+}
+
+.status-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.table-empty {
+  color: var(--muted);
 }
 
 h1,
