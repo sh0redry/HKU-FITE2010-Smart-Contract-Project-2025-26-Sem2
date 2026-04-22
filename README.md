@@ -9,6 +9,7 @@ The project now includes the Phase 4 pricing upgrade:
 - pricing differentiates by symbol, direction, term bucket, vault utilization, and inventory stress
 - the architecture is ready for a future off-chain risk engine such as `Chainlink Functions` or a backend service
 - Phase 5 market logic adds U.S. equity session handling, DST-aware clocks, holiday closures, close-buffer purchase blocking, and next-open settlement rules
+- Phase 6 adds an oracle-adapter layer, a Chainlink-style price source path, fallback-oracle handling, and keeper-based automatic settlement
 
 ## Architecture
 
@@ -29,8 +30,14 @@ The project now includes the Phase 4 pricing upgrade:
   - stress premium and risk score
 - `contracts/interfaces/IRiskParameterProvider.sol`
   Interface for externalized risk snapshots.
+- `contracts/interfaces/IOracleAdapter.sol`
+  Interface for spot-price adapters so pricing never reads raw feeds directly.
 - `contracts/mocks/MockRiskParameterProvider.sol`
   Owner-managed demo provider that mimics a future off-chain risk engine feed.
+- `contracts/adapters/ChainlinkOracleAdapter.sol`
+  Chainlink-style adapter that reads primary and fallback feeds, normalizes decimals, and enforces freshness via `maxStaleness`.
+- `contracts/automation/PolicySettlementAutomation.sol`
+  Keeper-compatible settlement worker that scans active policies and triggers batch settlement when policies are ready.
 
 ### Data and testing components
 
@@ -109,6 +116,41 @@ The current closed-market settlement rule is:
 - if a policy expires while the market is open, it can settle once expiry has passed
 - if a policy expires while the market is closed and the market uses `NextMarketOpen` settlement mode, settlement is blocked until the next valid open session
 - the demo then reads the current oracle price when settlement becomes allowed
+
+## Phase 6 oracle and automation logic
+
+The spot-price path is now split into an adapter layer.
+
+- `PricingOracle` no longer depends on raw mock feeds
+- spot prices are fetched through `IOracleAdapter`
+- the provided concrete implementation is `ChainlinkOracleAdapter`
+- each symbol can use:
+  - a primary feed
+  - an optional fallback feed
+  - a freshness threshold
+
+Current fallback behavior:
+
+- if the primary feed is fresh and valid, it is used
+- if the primary feed is stale or invalid and a valid fallback feed exists, the fallback is used
+- if no valid source exists, quoting and settlement revert
+- if a market disallows fallback usage, a fallback response is rejected
+
+This gives you a clean path for:
+
+- local testing with mock feeds
+- testnet deployment with Chainlink-compatible feeds
+- future replacement with another oracle adapter without rewriting `PricingOracle`
+
+### Automation
+
+`PolicySettlementAutomation` implements a keeper-style flow:
+
+- `checkUpkeep` scans a page of active policies
+- it filters for policies whose expiry has passed and whose settlement price is available
+- `performUpkeep` batch-settles those policy ids through `PolicyFactory`
+
+`PolicyFactory` now keeps an active-policy index to support this automation path.
 
 ## Supported symbols
 
@@ -213,5 +255,7 @@ The current Hardhat suite covers:
 - near-close purchase blocking
 - overnight gap surcharge behavior
 - next-open settlement gating for after-hours expiry
+- fallback oracle usage when the primary feed is stale
+- keeper-based automatic settlement
 - utilization validation above `100%`
 - underwriting result and LP share-price tracking after profitable underwriting

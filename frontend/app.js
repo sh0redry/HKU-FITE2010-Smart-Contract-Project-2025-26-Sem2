@@ -10,7 +10,7 @@ const state = {
 };
 
 const policyFactoryAbi = [
-  "function previewPolicy(bytes32 symbol, bool isDownsideProtection, uint256 notional, uint256 duration, uint16 triggerBps, uint256 deductible, uint256 payoutCap) view returns ((uint256 premium, uint256 spotPrice, uint256 strikePrice, uint256 notional, uint256 deductible, uint256 payoutCap, uint256 annualVolBps, uint256 estimatedProbabilityBps, uint256 termStructureMultiplierBps, uint256 directionalRiskBps, uint256 inventoryPressureBps, uint256 stressPremiumBps, uint256 riskScoreBps, uint256 utilizationSurchargeBps, uint256 overnightGapSurchargeBps, uint16 triggerBps, bool isDownsideProtection, bool settlesAtNextOpen, uint256 expiry, uint256 effectiveSettlementTime))",
+  "function previewPolicy(bytes32 symbol, bool isDownsideProtection, uint256 notional, uint256 duration, uint16 triggerBps, uint256 deductible, uint256 payoutCap) view returns ((uint256 premium, uint256 spotPrice, uint256 strikePrice, uint256 notional, uint256 deductible, uint256 payoutCap, uint256 annualVolBps, uint256 estimatedProbabilityBps, uint256 termStructureMultiplierBps, uint256 directionalRiskBps, uint256 inventoryPressureBps, uint256 stressPremiumBps, uint256 riskScoreBps, uint256 utilizationSurchargeBps, uint256 overnightGapSurchargeBps, uint256 oracleUpdatedAt, uint16 triggerBps, bool isDownsideProtection, bool oracleUsedFallback, bool settlesAtNextOpen, uint256 expiry, uint256 effectiveSettlementTime, bytes32 oracleSourceTag))",
   "function purchasePolicy(bytes32 symbol, bool isDownsideProtection, uint256 notional, uint256 duration, uint16 triggerBps, uint256 deductible, uint256 payoutCap) returns (uint256)",
   "function settlePolicy(uint256 policyId)",
   "function cancelPolicy(uint256 policyId)",
@@ -194,6 +194,9 @@ async function getQuote() {
     `riskScoreBps: ${quote.riskScoreBps}\n` +
     `utilizationSurchargeBps: ${quote.utilizationSurchargeBps}\n` +
     `overnightGapSurchargeBps: ${quote.overnightGapSurchargeBps}\n` +
+    `oracleUpdatedAt: ${new Date(Number(quote.oracleUpdatedAt) * 1000).toLocaleString()}\n` +
+    `oracleUsedFallback: ${quote.oracleUsedFallback}\n` +
+    `oracleSourceTag: ${ethers.decodeBytes32String(quote.oracleSourceTag).replace(/\u0000/g, "")}\n` +
     `settlesAtNextOpen: ${quote.settlesAtNextOpen}\n` +
     `expiry: ${new Date(Number(quote.expiry) * 1000).toLocaleString()}\n` +
     `effectiveSettlementTime: ${new Date(Number(quote.effectiveSettlementTime) * 1000).toLocaleString()}\n` +

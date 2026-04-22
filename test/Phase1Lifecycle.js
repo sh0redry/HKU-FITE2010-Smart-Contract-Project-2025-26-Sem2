@@ -2,7 +2,7 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { loadFixture, time } = require("@nomicfoundation/hardhat-toolbox/network-helpers");
 
-describe("Phase 5 Market Lifecycle", function () {
+describe("Phase 6 Oracle Automation Lifecycle", function () {
   const AAPL = ethers.encodeBytes32String("AAPL");
   const MSFT = ethers.encodeBytes32String("MSFT");
   const NVDA = ethers.encodeBytes32String("NVDA");
@@ -51,12 +51,20 @@ describe("Phase 5 Market Lifecycle", function () {
     const riskParameterProvider = await MockRiskParameterProvider.deploy(owner.address);
     await riskParameterProvider.waitForDeployment();
 
+    const ChainlinkOracleAdapter = await ethers.getContractFactory("ChainlinkOracleAdapter");
+    const oracleAdapter = await ChainlinkOracleAdapter.deploy(owner.address);
+    await oracleAdapter.waitForDeployment();
+
     const MockPriceFeed = await ethers.getContractFactory("MockPriceFeed");
     const spotFeed = await MockPriceFeed.deploy(185n * 10n ** 8n, 8, owner.address);
     await spotFeed.waitForDeployment();
 
     const PricingOracle = await ethers.getContractFactory("PricingOracle");
-    const pricingOracle = await PricingOracle.deploy(owner.address, await riskParameterProvider.getAddress());
+    const pricingOracle = await PricingOracle.deploy(
+      owner.address,
+      await riskParameterProvider.getAddress(),
+      await oracleAdapter.getAddress()
+    );
     await pricingOracle.waitForDeployment();
 
     const InsuranceVault = await ethers.getContractFactory("InsuranceVault");
@@ -71,8 +79,11 @@ describe("Phase 5 Market Lifecycle", function () {
     );
     await policyFactory.waitForDeployment();
 
+    const PolicySettlementAutomation = await ethers.getContractFactory("PolicySettlementAutomation");
+    const settlementAutomation = await PolicySettlementAutomation.deploy(await policyFactory.getAddress(), 10);
+    await settlementAutomation.waitForDeployment();
+
     const baseConfig = {
-      spotFeed: await spotFeed.getAddress(),
       minDuration: 3600,
       maxDuration: 30 * 24 * 3600,
       basePremiumBps: 150,
@@ -85,18 +96,52 @@ describe("Phase 5 Market Lifecycle", function () {
       overnightGapSurchargeBps: 120,
       enforceMarketHours: false,
       useUsEquityCalendar: true,
-      settlementMode: SETTLEMENT_MODE_NEXT_OPEN,
+      allowFallbackOracle: true,
+      settlementMode: SETTLEMENT_MODE_CURRENT,
       isActive: true
     };
 
+    await oracleAdapter.configureFeed(AAPL, {
+      primaryFeed: await spotFeed.getAddress(),
+      fallbackFeed: ethers.ZeroAddress,
+      maxStaleness: 365 * 24 * 3600,
+      isActive: true
+    });
     await pricingOracle.configureMarket(AAPL, baseConfig);
+
+    const tslaSpotFeed = await MockPriceFeed.deploy(172n * 10n ** 8n, 8, owner.address);
+    await tslaSpotFeed.waitForDeployment();
+    await oracleAdapter.configureFeed(TSLA, {
+      primaryFeed: await tslaSpotFeed.getAddress(),
+      fallbackFeed: ethers.ZeroAddress,
+      maxStaleness: 365 * 24 * 3600,
+      isActive: true
+    });
     await pricingOracle.configureMarket(TSLA, {
       ...baseConfig,
       basePremiumBps: 190
     });
+
+    const nvdaSpotFeed = await MockPriceFeed.deploy(890n * 10n ** 8n, 8, owner.address);
+    await nvdaSpotFeed.waitForDeployment();
+    await oracleAdapter.configureFeed(NVDA, {
+      primaryFeed: await nvdaSpotFeed.getAddress(),
+      fallbackFeed: ethers.ZeroAddress,
+      maxStaleness: 365 * 24 * 3600,
+      isActive: true
+    });
     await pricingOracle.configureMarket(NVDA, {
       ...baseConfig,
       basePremiumBps: 175
+    });
+
+    const msftSpotFeed = await MockPriceFeed.deploy(415n * 10n ** 8n, 8, owner.address);
+    await msftSpotFeed.waitForDeployment();
+    await oracleAdapter.configureFeed(MSFT, {
+      primaryFeed: await msftSpotFeed.getAddress(),
+      fallbackFeed: ethers.ZeroAddress,
+      maxStaleness: 365 * 24 * 3600,
+      isActive: true
     });
     await pricingOracle.configureMarket(MSFT, {
       ...baseConfig,
@@ -177,10 +222,15 @@ describe("Phase 5 Market Lifecycle", function () {
       buyer,
       mockUsdc,
       spotFeed,
+      tslaSpotFeed,
+      nvdaSpotFeed,
+      msftSpotFeed,
+      oracleAdapter,
       riskParameterProvider,
       pricingOracle,
       insuranceVault,
       policyFactory,
+      settlementAutomation,
       baseConfig
     };
   }
@@ -383,13 +433,18 @@ describe("Phase 5 Market Lifecycle", function () {
   });
 
   it("rejects quotes when the risk snapshot is missing", async function () {
-    const { owner, pricingOracle } = await loadFixture(deployFixture);
+    const { owner, pricingOracle, oracleAdapter } = await loadFixture(deployFixture);
     const MockPriceFeed = await ethers.getContractFactory("MockPriceFeed");
     const amznSpotFeed = await MockPriceFeed.deploy(178n * 10n ** 8n, 8, owner.address);
     await amznSpotFeed.waitForDeployment();
 
+    await oracleAdapter.configureFeed(ethers.encodeBytes32String("AMZN"), {
+      primaryFeed: await amznSpotFeed.getAddress(),
+      fallbackFeed: ethers.ZeroAddress,
+      maxStaleness: 24 * 3600,
+      isActive: true
+    });
     await pricingOracle.configureMarket(ethers.encodeBytes32String("AMZN"), {
-      spotFeed: await amznSpotFeed.getAddress(),
       minDuration: 3600,
       maxDuration: 30 * 24 * 3600,
       basePremiumBps: 155,
@@ -402,6 +457,7 @@ describe("Phase 5 Market Lifecycle", function () {
       overnightGapSurchargeBps: 120,
       enforceMarketHours: false,
       useUsEquityCalendar: true,
+      allowFallbackOracle: true,
       settlementMode: SETTLEMENT_MODE_NEXT_OPEN,
       isActive: true
     });
@@ -483,8 +539,17 @@ describe("Phase 5 Market Lifecycle", function () {
   });
 
   it("respects US market hours in both standard time and daylight saving time", async function () {
-    const { pricingOracle, baseConfig } = await loadFixture(deployFixture);
+    const { owner, pricingOracle, baseConfig, oracleAdapter } = await loadFixture(deployFixture);
+    const MockPriceFeed = await ethers.getContractFactory("MockPriceFeed");
+    const amdSpotFeed = await MockPriceFeed.deploy(120n * 10n ** 8n, 8, owner.address);
+    await amdSpotFeed.waitForDeployment();
 
+    await oracleAdapter.configureFeed(ethers.encodeBytes32String("AMD"), {
+      primaryFeed: await amdSpotFeed.getAddress(),
+      fallbackFeed: ethers.ZeroAddress,
+      maxStaleness: 24 * 3600,
+      isActive: true
+    });
     await pricingOracle.configureMarket(ethers.encodeBytes32String("AMD"), {
       ...baseConfig,
       enforceMarketHours: true
@@ -504,15 +569,20 @@ describe("Phase 5 Market Lifecycle", function () {
   });
 
   it("treats configured US holidays as closed market days", async function () {
-    const { pricingOracle, policyFactory, baseConfig } = await loadFixture(deployFixture);
+    const { pricingOracle, policyFactory, baseConfig, oracleAdapter } = await loadFixture(deployFixture);
     const IBM = ethers.encodeBytes32String("IBM");
     const MockPriceFeed = await ethers.getContractFactory("MockPriceFeed");
     const ibmSpotFeed = await MockPriceFeed.deploy(250n * 10n ** 8n, 8, (await ethers.getSigners())[0].address);
     await ibmSpotFeed.waitForDeployment();
 
+    await oracleAdapter.configureFeed(IBM, {
+      primaryFeed: await ibmSpotFeed.getAddress(),
+      fallbackFeed: ethers.ZeroAddress,
+      maxStaleness: 24 * 3600,
+      isActive: true
+    });
     await pricingOracle.configureMarket(IBM, {
       ...baseConfig,
-      spotFeed: await ibmSpotFeed.getAddress(),
       enforceMarketHours: true
     });
     await pricingOracle.setHolidayClosure(20260703, true);
@@ -533,15 +603,20 @@ describe("Phase 5 Market Lifecycle", function () {
   });
 
   it("blocks new policies too close to the close and adds overnight gap surcharge across sessions", async function () {
-    const { pricingOracle, policyFactory, baseConfig } = await loadFixture(deployFixture);
+    const { pricingOracle, policyFactory, baseConfig, oracleAdapter } = await loadFixture(deployFixture);
     const ORCL = ethers.encodeBytes32String("ORCL");
     const MockPriceFeed = await ethers.getContractFactory("MockPriceFeed");
     const orclSpotFeed = await MockPriceFeed.deploy(145n * 10n ** 8n, 8, (await ethers.getSigners())[0].address);
     await orclSpotFeed.waitForDeployment();
 
+    await oracleAdapter.configureFeed(ORCL, {
+      primaryFeed: await orclSpotFeed.getAddress(),
+      fallbackFeed: ethers.ZeroAddress,
+      maxStaleness: 365 * 24 * 3600,
+      isActive: true
+    });
     await pricingOracle.configureMarket(ORCL, {
       ...baseConfig,
-      spotFeed: await orclSpotFeed.getAddress(),
       enforceMarketHours: true
     });
     const riskProvider = await ethers.getContractAt(
@@ -603,12 +678,17 @@ describe("Phase 5 Market Lifecycle", function () {
   });
 
   it("settles after hours policies on the next market open window", async function () {
-    const { lp, buyer, mockUsdc, spotFeed, pricingOracle, insuranceVault, policyFactory, baseConfig } =
+    const { lp, buyer, mockUsdc, spotFeed, pricingOracle, insuranceVault, policyFactory, baseConfig, oracleAdapter } =
       await loadFixture(deployFixture);
 
+    await oracleAdapter.configureFeed(AAPL, {
+      primaryFeed: await spotFeed.getAddress(),
+      fallbackFeed: ethers.ZeroAddress,
+      maxStaleness: 365 * 24 * 3600,
+      isActive: true
+    });
     await pricingOracle.configureMarket(AAPL, {
       ...baseConfig,
-      spotFeed: await spotFeed.getAddress(),
       enforceMarketHours: true,
       settlementMode: SETTLEMENT_MODE_NEXT_OPEN
     });
@@ -656,6 +736,92 @@ describe("Phase 5 Market Lifecycle", function () {
         true
       )
     ).to.be.revertedWithCustomError(pricingOracle, "InvalidUtilization");
+  });
+
+  it("uses fallback oracle data when the primary feed is stale", async function () {
+    const { owner, pricingOracle, policyFactory, oracleAdapter, baseConfig } = await loadFixture(deployFixture);
+    const META = ethers.encodeBytes32String("META");
+    const MockPriceFeed = await ethers.getContractFactory("MockPriceFeed");
+    const primaryFeed = await MockPriceFeed.deploy(600n * 10n ** 8n, 8, owner.address);
+    const fallbackFeed = await MockPriceFeed.deploy(590n * 10n ** 8n, 8, owner.address);
+    await primaryFeed.waitForDeployment();
+    await fallbackFeed.waitForDeployment();
+
+    await primaryFeed.setAnswerWithTimestamp(600n * 10n ** 8n, 1);
+    await fallbackFeed.setAnswerWithTimestamp(590n * 10n ** 8n, await time.latest());
+
+    await oracleAdapter.configureFeed(META, {
+      primaryFeed: await primaryFeed.getAddress(),
+      fallbackFeed: await fallbackFeed.getAddress(),
+      maxStaleness: 24 * 3600,
+      isActive: true
+    });
+    await pricingOracle.configureMarket(META, {
+      ...baseConfig,
+      basePremiumBps: 165
+    });
+
+    const riskProvider = await ethers.getContractAt(
+      "MockRiskParameterProvider",
+      await pricingOracle.riskParameterProvider()
+    );
+    await riskProvider.setRiskSnapshot(
+      META,
+      riskSnapshot({
+        impliedVolBps: 3100,
+        downsideSkewBps: 130,
+        upsideSkewBps: 95,
+        shortTermMultiplierBps: 10300,
+        mediumTermMultiplierBps: 10050,
+        longTermMultiplierBps: 9700,
+        downsideInventoryPressureBps: 75,
+        upsideInventoryPressureBps: 50,
+        stressPremiumBps: 50,
+        riskScoreBps: 6000,
+        sourceTag: "TEST_META"
+      })
+    );
+
+    const quote = await policyFactory.previewPolicy(
+      META,
+      true,
+      ethers.parseUnits("1000", USDC_DECIMALS),
+      24 * 3600,
+      1000,
+      0,
+      ethers.parseUnits("500", USDC_DECIMALS)
+    );
+
+    expect(quote.oracleUsedFallback).to.equal(true);
+    expect(quote.spotPrice).to.equal(ethers.parseEther("590"));
+  });
+
+  it("automation keeper finds and settles ready policies", async function () {
+    const { lp, buyer, mockUsdc, spotFeed, insuranceVault, policyFactory, settlementAutomation } =
+      await loadFixture(deployFixture);
+
+    const lpDeposit = ethers.parseUnits("10000", USDC_DECIMALS);
+    const notional = ethers.parseUnits("1000", USDC_DECIMALS);
+    const payoutCap = ethers.parseUnits("500", USDC_DECIMALS);
+
+    await approveAndDeposit(mockUsdc, insuranceVault, lp, lpDeposit);
+    const quote = await policyFactory.previewPolicy(AAPL, true, notional, 24 * 3600, 1000, 0, payoutCap);
+
+    await mockUsdc.connect(buyer).approve(await insuranceVault.getAddress(), quote.premium);
+    await policyFactory.connect(buyer).purchasePolicy(AAPL, true, notional, 24 * 3600, 1000, 0, payoutCap);
+
+    await spotFeed.setAnswer(120n * 10n ** 8n);
+    const purchasedPolicy = await policyFactory.getPolicy(1);
+    await time.increaseTo(Number(purchasedPolicy.expiry) + 1);
+
+    const [upkeepNeeded, performData] = await settlementAutomation.checkUpkeep("0x");
+    expect(upkeepNeeded).to.equal(true);
+
+    await settlementAutomation.performUpkeep(performData);
+
+    const settledPolicy = await policyFactory.getPolicy(1);
+    expect(settledPolicy.status).to.equal(1);
+    expect(await policyFactory.getActivePoliciesCount()).to.equal(0);
   });
 
   it("tracks underwriting metrics and LP share price after profit", async function () {

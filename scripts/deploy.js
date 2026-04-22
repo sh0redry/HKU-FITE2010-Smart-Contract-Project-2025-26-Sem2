@@ -43,12 +43,20 @@ async function main() {
   const riskParameterProvider = await MockRiskParameterProvider.deploy(deployer.address);
   await riskParameterProvider.waitForDeployment();
 
+  const ChainlinkOracleAdapter = await ethers.getContractFactory("ChainlinkOracleAdapter");
+  const oracleAdapter = await ChainlinkOracleAdapter.deploy(deployer.address);
+  await oracleAdapter.waitForDeployment();
+
   const MockPriceFeed = await ethers.getContractFactory("MockPriceFeed");
   const spotFeed = await MockPriceFeed.deploy(185n * 10n ** 8n, 8, deployer.address);
   await spotFeed.waitForDeployment();
 
   const PricingOracle = await ethers.getContractFactory("PricingOracle");
-  const pricingOracle = await PricingOracle.deploy(deployer.address, await riskParameterProvider.getAddress());
+  const pricingOracle = await PricingOracle.deploy(
+    deployer.address,
+    await riskParameterProvider.getAddress(),
+    await oracleAdapter.getAddress()
+  );
   await pricingOracle.waitForDeployment();
 
   const InsuranceVault = await ethers.getContractFactory("InsuranceVault");
@@ -62,6 +70,10 @@ async function main() {
     await pricingOracle.getAddress()
   );
   await policyFactory.waitForDeployment();
+
+  const PolicySettlementAutomation = await ethers.getContractFactory("PolicySettlementAutomation");
+  const settlementAutomation = await PolicySettlementAutomation.deploy(await policyFactory.getAddress(), 10);
+  await settlementAutomation.waitForDeployment();
 
   const marketSeedData = {
     AAPL: {
@@ -138,7 +150,6 @@ async function main() {
     await marketSeedData[symbol].spot.waitForDeployment();
 
     await pricingOracle.configureMarket(ethers.encodeBytes32String(symbol), {
-      spotFeed: await marketSeedData[symbol].spot.getAddress(),
       minDuration: 3600,
       maxDuration: 30 * 24 * 3600,
       basePremiumBps: marketSeedData[symbol].basePremiumBps,
@@ -151,10 +162,17 @@ async function main() {
       overnightGapSurchargeBps: 120,
       enforceMarketHours: false,
       useUsEquityCalendar: true,
+      allowFallbackOracle: true,
       settlementMode: SETTLEMENT_MODE_NEXT_OPEN,
       isActive: true
     });
 
+    await oracleAdapter.configureFeed(ethers.encodeBytes32String(symbol), {
+      primaryFeed: await marketSeedData[symbol].spot.getAddress(),
+      fallbackFeed: ethers.ZeroAddress,
+      maxStaleness: 24 * 3600,
+      isActive: true
+    });
     await riskParameterProvider.setRiskSnapshot(ethers.encodeBytes32String(symbol), marketSeedData[symbol].riskSnapshot);
   }
 
@@ -178,9 +196,11 @@ async function main() {
     contracts: {
       mockUsdc: await mockUsdc.getAddress(),
       riskParameterProvider: await riskParameterProvider.getAddress(),
+      oracleAdapter: await oracleAdapter.getAddress(),
       pricingOracle: await pricingOracle.getAddress(),
       insuranceVault: await insuranceVault.getAddress(),
-      policyFactory: await policyFactory.getAddress()
+      policyFactory: await policyFactory.getAddress(),
+      settlementAutomation: await settlementAutomation.getAddress()
     },
     markets: {
       AAPL: {

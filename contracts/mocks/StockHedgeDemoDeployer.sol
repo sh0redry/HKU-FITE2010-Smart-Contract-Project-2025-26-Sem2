@@ -3,6 +3,8 @@ pragma solidity ^0.8.20;
 
 import "../core/InsuranceVault.sol";
 import "../core/PolicyFactory.sol";
+import "../automation/PolicySettlementAutomation.sol";
+import "../adapters/ChainlinkOracleAdapter.sol";
 import "../engines/PricingOracle.sol";
 import "../interfaces/IPricingEngine.sol";
 import "../interfaces/IRiskParameterProvider.sol";
@@ -20,6 +22,7 @@ contract StockHedgeDemoDeployer {
 
     MockUSDC public immutable mockUsdc;
     MockRiskParameterProvider public immutable riskParameterProvider;
+    ChainlinkOracleAdapter public immutable oracleAdapter;
     MockPriceFeed public immutable aaplSpotFeed;
     MockPriceFeed public immutable tslaSpotFeed;
     MockPriceFeed public immutable nvdaSpotFeed;
@@ -27,6 +30,7 @@ contract StockHedgeDemoDeployer {
     PricingOracle public immutable pricingOracle;
     InsuranceVault public immutable insuranceVault;
     PolicyFactory public immutable policyFactory;
+    PolicySettlementAutomation public immutable settlementAutomation;
 
     error InvalidOwner();
 
@@ -35,19 +39,26 @@ contract StockHedgeDemoDeployer {
 
         mockUsdc = new MockUSDC(address(this));
         riskParameterProvider = new MockRiskParameterProvider(address(this));
+        oracleAdapter = new ChainlinkOracleAdapter(address(this));
         aaplSpotFeed = new MockPriceFeed(185e8, 8, finalOwner);
         tslaSpotFeed = new MockPriceFeed(172e8, 8, finalOwner);
         nvdaSpotFeed = new MockPriceFeed(890e8, 8, finalOwner);
         msftSpotFeed = new MockPriceFeed(415e8, 8, finalOwner);
 
-        pricingOracle = new PricingOracle(address(this), address(riskParameterProvider));
+        pricingOracle = new PricingOracle(address(this), address(riskParameterProvider), address(oracleAdapter));
         insuranceVault = new InsuranceVault(address(this), address(mockUsdc));
         policyFactory = new PolicyFactory(finalOwner, address(insuranceVault), address(pricingOracle));
+        settlementAutomation = new PolicySettlementAutomation(address(policyFactory), 10);
 
-        pricingOracle.configureMarket(AAPL, _marketConfig(address(aaplSpotFeed), 150));
-        pricingOracle.configureMarket(TSLA, _marketConfig(address(tslaSpotFeed), 190));
-        pricingOracle.configureMarket(NVDA, _marketConfig(address(nvdaSpotFeed), 175));
-        pricingOracle.configureMarket(MSFT, _marketConfig(address(msftSpotFeed), 135));
+        oracleAdapter.configureFeed(AAPL, _feedConfig(address(aaplSpotFeed)));
+        oracleAdapter.configureFeed(TSLA, _feedConfig(address(tslaSpotFeed)));
+        oracleAdapter.configureFeed(NVDA, _feedConfig(address(nvdaSpotFeed)));
+        oracleAdapter.configureFeed(MSFT, _feedConfig(address(msftSpotFeed)));
+
+        pricingOracle.configureMarket(AAPL, _marketConfig(150));
+        pricingOracle.configureMarket(TSLA, _marketConfig(190));
+        pricingOracle.configureMarket(NVDA, _marketConfig(175));
+        pricingOracle.configureMarket(MSFT, _marketConfig(135));
 
         riskParameterProvider.setRiskSnapshot(AAPL, _riskSnapshot(2800, 120, 90, 10250, 10000, 9650, 80, 45, 55, 6200, "MANUAL_AAPL"));
         riskParameterProvider.setRiskSnapshot(TSLA, _riskSnapshot(4200, 180, 140, 10800, 10300, 9800, 130, 90, 85, 7600, "MANUAL_TSLA"));
@@ -63,11 +74,9 @@ contract StockHedgeDemoDeployer {
     }
 
     function _marketConfig(
-        address spotFeed,
         uint256 basePremiumBps
     ) internal pure returns (PricingOracle.MarketConfigInput memory marketConfig) {
         marketConfig = PricingOracle.MarketConfigInput({
-            spotFeed: spotFeed,
             minDuration: 1 hours,
             maxDuration: 30 days,
             basePremiumBps: basePremiumBps,
@@ -80,7 +89,21 @@ contract StockHedgeDemoDeployer {
             overnightGapSurchargeBps: 120,
             enforceMarketHours: false,
             useUsEquityCalendar: true,
+            allowFallbackOracle: true,
             settlementMode: IPricingEngine.SettlementMode(SETTLEMENT_MODE_NEXT_OPEN),
+            isActive: true
+        });
+    }
+
+    function _feedConfig(address primaryFeed)
+        internal
+        pure
+        returns (ChainlinkOracleAdapter.FeedConfig memory config)
+    {
+        config = ChainlinkOracleAdapter.FeedConfig({
+            primaryFeed: primaryFeed,
+            fallbackFeed: address(0),
+            maxStaleness: 1 days,
             isActive: true
         });
     }

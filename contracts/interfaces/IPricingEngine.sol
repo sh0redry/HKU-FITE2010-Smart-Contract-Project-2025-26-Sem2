@@ -23,11 +23,14 @@ interface IPricingEngine {
         uint256 riskScoreBps;
         uint256 utilizationSurchargeBps;
         uint256 overnightGapSurchargeBps;
+        uint256 oracleUpdatedAt;
         uint16 triggerBps;
         bool isDownsideProtection;
+        bool oracleUsedFallback;
         bool settlesAtNextOpen;
         uint256 expiry;
         uint256 effectiveSettlementTime;
+        bytes32 oracleSourceTag;
     }
 
     struct MarketHours {
@@ -59,4 +62,6 @@ interface IPricingEngine {
     function isSupportedSymbol(bytes32 symbol) external view returns (bool);
 
     function riskParameterProvider() external view returns (address);
+
+    function oracleAdapter() external view returns (address);
 }

@@ -43,6 +43,8 @@ contract PolicyFactory {
 
     mapping(uint256 => Policy) private policies;
     mapping(address => uint256[]) public policyIdsByHolder;
+    uint256[] private activePolicyIds;
+    mapping(uint256 => uint256) private activePolicyIndex;
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event PolicyPurchased(
@@ -148,6 +150,8 @@ contract PolicyFactory {
             status: PolicyStatus.Active
         });
         policyIdsByHolder[msg.sender].push(policyId);
+        activePolicyIndex[policyId] = activePolicyIds.length;
+        activePolicyIds.push(policyId);
 
         emit PolicyPurchased(
             policyId,
@@ -166,6 +170,16 @@ contract PolicyFactory {
     }
 
     function settlePolicy(uint256 policyId) external {
+        _settlePolicy(policyId);
+    }
+
+    function settlePolicies(uint256[] calldata policyIds) external {
+        for (uint256 i = 0; i < policyIds.length; i++) {
+            _settlePolicy(policyIds[i]);
+        }
+    }
+
+    function _settlePolicy(uint256 policyId) internal {
         Policy storage policy = policies[policyId];
         if (policy.status != PolicyStatus.Active) revert PolicyNotActive();
         if (block.timestamp < policy.expiry) revert PolicyNotExpired();
@@ -186,6 +200,7 @@ contract PolicyFactory {
         if (releasedLiquidity > 0) {
             vault.releaseLiquidity(releasedLiquidity);
         }
+        _removeActivePolicy(policyId);
 
         emit PolicySettled(policyId, exitPrice, payout, releasedLiquidity);
     }
@@ -201,6 +216,7 @@ contract PolicyFactory {
         policy.settledAt = block.timestamp;
 
         vault.releaseLiquidity(policy.reservedLiquidity);
+        _removeActivePolicy(policyId);
         emit PolicyCancelled(policyId, msg.sender, policy.reservedLiquidity, block.timestamp);
     }
 
@@ -210,6 +226,38 @@ contract PolicyFactory {
 
     function getPolicy(uint256 policyId) external view returns (Policy memory) {
         return policies[policyId];
+    }
+
+    function getActivePoliciesCount() external view returns (uint256) {
+        return activePolicyIds.length;
+    }
+
+    function getActivePolicyIds(uint256 cursor, uint256 size) external view returns (uint256[] memory ids) {
+        uint256 end = cursor + size;
+        if (end > activePolicyIds.length) {
+            end = activePolicyIds.length;
+        }
+        if (cursor >= end) {
+            return new uint256[](0);
+        }
+
+        ids = new uint256[](end - cursor);
+        for (uint256 i = cursor; i < end; i++) {
+            ids[i - cursor] = activePolicyIds[i];
+        }
+    }
+
+    function isPolicySettleable(uint256 policyId) public view returns (bool) {
+        Policy storage policy = policies[policyId];
+        if (policy.status != PolicyStatus.Active || block.timestamp < policy.expiry) {
+            return false;
+        }
+
+        try pricingEngine.getSettlementPrice(policy.symbol, policy.expiry) returns (uint256, uint256) {
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     function previewPolicy(
@@ -260,5 +308,19 @@ contract PolicyFactory {
         if (payout > policy.payoutCap) {
             payout = policy.payoutCap;
         }
+    }
+
+    function _removeActivePolicy(uint256 policyId) internal {
+        uint256 lastIndex = activePolicyIds.length - 1;
+        uint256 removeIndex = activePolicyIndex[policyId];
+
+        if (removeIndex != lastIndex) {
+            uint256 movedPolicyId = activePolicyIds[lastIndex];
+            activePolicyIds[removeIndex] = movedPolicyId;
+            activePolicyIndex[movedPolicyId] = removeIndex;
+        }
+
+        activePolicyIds.pop();
+        delete activePolicyIndex[policyId];
     }
 }

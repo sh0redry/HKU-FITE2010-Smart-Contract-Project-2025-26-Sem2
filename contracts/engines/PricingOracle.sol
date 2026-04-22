@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "../interfaces/IPriceFeed.sol";
 import "../interfaces/IPricingEngine.sol";
+import "../interfaces/IOracleAdapter.sol";
 import "../interfaces/IRiskParameterProvider.sol";
 
 contract PricingOracle is IPricingEngine {
@@ -16,9 +16,9 @@ contract PricingOracle is IPricingEngine {
 
     address public owner;
     address public override riskParameterProvider;
+    address public override oracleAdapter;
 
     struct MarketConfig {
-        address spotFeed;
         uint256 minDuration;
         uint256 maxDuration;
         uint256 basePremiumBps;
@@ -31,12 +31,12 @@ contract PricingOracle is IPricingEngine {
         uint16 overnightGapSurchargeBps;
         bool enforceMarketHours;
         bool useUsEquityCalendar;
+        bool allowFallbackOracle;
         SettlementMode settlementMode;
         bool isActive;
     }
 
     struct MarketConfigInput {
-        address spotFeed;
         uint256 minDuration;
         uint256 maxDuration;
         uint256 basePremiumBps;
@@ -49,6 +49,7 @@ contract PricingOracle is IPricingEngine {
         uint16 overnightGapSurchargeBps;
         bool enforceMarketHours;
         bool useUsEquityCalendar;
+        bool allowFallbackOracle;
         SettlementMode settlementMode;
         bool isActive;
     }
@@ -69,11 +70,11 @@ contract PricingOracle is IPricingEngine {
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event MarketConfigured(
         bytes32 indexed symbol,
-        address indexed spotFeed,
         uint256 basePremiumBps,
         uint256 maxNotional
     );
     event RiskParameterProviderUpdated(address indexed previousProvider, address indexed newProvider);
+    event OracleAdapterUpdated(address indexed previousAdapter, address indexed newAdapter);
     event HolidayClosureUpdated(uint256 indexed dateKey, bool isClosed);
 
     error NotOwner();
@@ -88,20 +89,27 @@ contract PricingOracle is IPricingEngine {
     error MarketClosingSoon(bytes32 symbol);
     error InvalidOracleAnswer();
     error InvalidRiskProvider();
+    error InvalidOracleAdapter();
     error MissingRiskSnapshot(bytes32 symbol);
     error SettlementPricePending(bytes32 symbol, uint256 effectiveTimestamp);
+    error OracleUnavailable(bytes32 symbol);
+    error FallbackOracleDisabled(bytes32 symbol);
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
         _;
     }
 
-    constructor(address initialOwner, address riskParameterProviderAddress) {
-        if (initialOwner == address(0) || riskParameterProviderAddress == address(0)) revert InvalidAddress();
+    constructor(address initialOwner, address riskParameterProviderAddress, address oracleAdapterAddress) {
+        if (
+            initialOwner == address(0) || riskParameterProviderAddress == address(0) || oracleAdapterAddress == address(0)
+        ) revert InvalidAddress();
         owner = initialOwner;
         riskParameterProvider = riskParameterProviderAddress;
+        oracleAdapter = oracleAdapterAddress;
         emit OwnershipTransferred(address(0), initialOwner);
         emit RiskParameterProviderUpdated(address(0), riskParameterProviderAddress);
+        emit OracleAdapterUpdated(address(0), oracleAdapterAddress);
     }
 
     function transferOwnership(address newOwner) external onlyOwner {
@@ -116,8 +124,13 @@ contract PricingOracle is IPricingEngine {
         riskParameterProvider = newProvider;
     }
 
+    function setOracleAdapter(address newAdapter) external onlyOwner {
+        if (newAdapter == address(0)) revert InvalidOracleAdapter();
+        emit OracleAdapterUpdated(oracleAdapter, newAdapter);
+        oracleAdapter = newAdapter;
+    }
+
     function configureMarket(bytes32 symbol, MarketConfigInput calldata config) external onlyOwner {
-        if (config.spotFeed == address(0)) revert InvalidAddress();
         if (config.minDuration == 0 || config.maxDuration < config.minDuration) revert InvalidDuration();
         if (config.openMinutesLocal >= DAY / 1 minutes || config.closeMinutesLocal >= DAY / 1 minutes) {
             revert InvalidDuration();
@@ -129,7 +142,6 @@ contract PricingOracle is IPricingEngine {
         }
 
         MarketConfig storage market = marketConfigs[symbol];
-        market.spotFeed = config.spotFeed;
         market.minDuration = config.minDuration;
         market.maxDuration = config.maxDuration;
         market.basePremiumBps = config.basePremiumBps;
@@ -142,12 +154,12 @@ contract PricingOracle is IPricingEngine {
         market.overnightGapSurchargeBps = config.overnightGapSurchargeBps;
         market.enforceMarketHours = config.enforceMarketHours;
         market.useUsEquityCalendar = config.useUsEquityCalendar;
+        market.allowFallbackOracle = config.allowFallbackOracle;
         market.settlementMode = config.settlementMode;
         market.isActive = config.isActive;
 
         emit MarketConfigured(
             symbol,
-            config.spotFeed,
             config.basePremiumBps,
             config.maxNotional
         );
@@ -183,7 +195,8 @@ contract PricingOracle is IPricingEngine {
             if (minutesUntilClose <= config.closeBufferMinutes) revert MarketClosingSoon(symbol);
         }
 
-        uint256 spotPrice = _readNormalizedFeed(config.spotFeed);
+        IOracleAdapter.OracleResponse memory oracleResponse = _readSpotOracle(symbol, config.allowFallbackOracle);
+        uint256 spotPrice = oracleResponse.price;
         IRiskParameterProvider.RiskSnapshot memory snapshot = IRiskParameterProvider(riskParameterProvider)
             .getRiskSnapshot(symbol);
         if (snapshot.impliedVolBps == 0 || snapshot.updatedAt == 0) revert MissingRiskSnapshot(symbol);
@@ -234,18 +247,21 @@ contract PricingOracle is IPricingEngine {
             riskScoreBps: snapshot.riskScoreBps,
             utilizationSurchargeBps: surchargeBps,
             overnightGapSurchargeBps: overnightGapSurchargeBps,
+            oracleUpdatedAt: oracleResponse.updatedAt,
             triggerBps: triggerBps,
             isDownsideProtection: isDownsideProtection,
+            oracleUsedFallback: oracleResponse.usedFallback,
             settlesAtNextOpen: effectiveSettlementTime > scheduledExpiry,
             expiry: scheduledExpiry,
-            effectiveSettlementTime: effectiveSettlementTime
+            effectiveSettlementTime: effectiveSettlementTime,
+            oracleSourceTag: oracleResponse.sourceTag
         });
     }
 
     function getSpotPrice(bytes32 symbol) external view returns (uint256) {
         MarketConfig storage config = marketConfigs[symbol];
         if (!config.isActive) revert MarketInactive(symbol);
-        return _readNormalizedFeed(config.spotFeed);
+        return _readSpotOracle(symbol, config.allowFallbackOracle).price;
     }
 
     function getSettlementPrice(bytes32 symbol, uint256 scheduledExpiry)
@@ -259,7 +275,7 @@ contract PricingOracle is IPricingEngine {
         effectiveTimestamp = _effectiveSettlementTimestamp(config, scheduledExpiry);
         if (block.timestamp < effectiveTimestamp) revert SettlementPricePending(symbol, effectiveTimestamp);
 
-        price = _readNormalizedFeed(config.spotFeed);
+        price = _readSpotOracle(symbol, config.allowFallbackOracle).price;
     }
 
     function getSessionWindow(bytes32 symbol, uint256 timestamp)
@@ -374,18 +390,14 @@ contract PricingOracle is IPricingEngine {
         return scheduledExpiry > currentSession.closeTimestamp;
     }
 
-    function _readNormalizedFeed(address feed) internal view returns (uint256 value) {
-        int256 answer = IPriceFeed(feed).latestAnswer();
-        if (answer <= 0) revert InvalidOracleAnswer();
-
-        uint8 feedDecimals = IPriceFeed(feed).decimals();
-        value = uint256(answer);
-
-        if (feedDecimals < 18) {
-            value *= 10 ** (18 - feedDecimals);
-        } else if (feedDecimals > 18) {
-            value /= 10 ** (feedDecimals - 18);
-        }
+    function _readSpotOracle(bytes32 symbol, bool allowFallback)
+        internal
+        view
+        returns (IOracleAdapter.OracleResponse memory response)
+    {
+        response = IOracleAdapter(oracleAdapter).getPrice(symbol);
+        if (!response.isValid || response.price == 0 || response.updatedAt == 0) revert OracleUnavailable(symbol);
+        if (response.usedFallback && !allowFallback) revert FallbackOracleDisabled(symbol);
     }
 
     function _sessionContext(MarketConfig storage config, uint256 timestamp)
