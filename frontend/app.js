@@ -14,6 +14,7 @@ import {
   loadDeploymentByChain,
   policyStatusLabel
 } from "./shared.js";
+import { drawCandlestickChart, fetchMarketCandles, summarizeCandles, getRefreshIntervalMs } from "./live-market.js";
 
 const state = {
   provider: null,
@@ -26,7 +27,8 @@ const state = {
   deploymentFile: null,
   contracts: {},
   lastQuote: null,
-  lastPolicies: []
+  lastPolicies: [],
+  liveChartTimer: null
 };
 
 const STATUS_COLORS = {
@@ -38,6 +40,9 @@ const STATUS_COLORS = {
 
 const el = {
   connectButton: document.getElementById("connectButton"),
+  presetUsButton: document.getElementById("presetUsButton"),
+  presetHkButton: document.getElementById("presetHkButton"),
+  presetMockButton: document.getElementById("presetMockButton"),
   walletStatus: document.getElementById("walletStatus"),
   networkBadge: document.getElementById("networkBadge"),
   deploymentStatus: document.getElementById("deploymentStatus"),
@@ -59,6 +64,8 @@ const el = {
   quoteKpis: document.getElementById("quoteKpis"),
   quoteBreakdownChart: document.getElementById("quoteBreakdownChart"),
   priceRiskChart: document.getElementById("priceRiskChart"),
+  livePriceChart: document.getElementById("livePriceChart"),
+  liveChartStatus: document.getElementById("liveChartStatus"),
   settlePolicyIdInput: document.getElementById("settlePolicyIdInput"),
   settleButton: document.getElementById("settleButton"),
   cancelPolicyIdInput: document.getElementById("cancelPolicyIdInput"),
@@ -130,6 +137,76 @@ function formatToken(value) {
 
 function formatUsd18(value) {
   return `${ethers.formatUnits(value, 18)} USD`;
+}
+
+async function refreshLiveChart() {
+  const symbol = el.symbolInput.value;
+
+  try {
+    const candles = await fetchMarketCandles(symbol, state.deployment);
+    drawCandlestickChart(el.livePriceChart, candles, `${symbol} intraday candles`);
+    el.liveChartStatus.textContent = summarizeCandles(candles);
+  } catch (error) {
+    drawCandlestickChart(el.livePriceChart, [], `${symbol} intraday candles`);
+    el.liveChartStatus.textContent = error.message;
+  }
+}
+
+async function scheduleLiveChartRefresh() {
+  if (state.liveChartTimer) {
+    clearInterval(state.liveChartTimer);
+  }
+
+  await refreshLiveChart();
+  const refreshIntervalMs = await getRefreshIntervalMs();
+  state.liveChartTimer = setInterval(() => {
+    refreshLiveChart();
+  }, refreshIntervalMs);
+}
+
+function applyPreset(type) {
+  const presets = {
+    us: {
+      symbol: "AAPL",
+      notional: "1000",
+      durationHours: "24",
+      direction: "down",
+      triggerBps: "1000",
+      deductible: "0",
+      payoutCap: "500"
+    },
+    hk: {
+      symbol: "0700HK",
+      notional: "1000",
+      durationHours: "24",
+      direction: "down",
+      triggerBps: "1000",
+      deductible: "0",
+      payoutCap: "500"
+    },
+    mock: {
+      symbol: "MOCK",
+      notional: "1500",
+      durationHours: "720",
+      direction: "down",
+      triggerBps: "1500",
+      deductible: "25",
+      payoutCap: "800"
+    }
+  };
+
+  const preset = presets[type];
+  if (!preset) return;
+
+  el.symbolInput.value = preset.symbol;
+  el.notionalInput.value = preset.notional;
+  el.durationInput.value = preset.durationHours;
+  el.directionInput.value = preset.direction;
+  el.triggerInput.value = preset.triggerBps;
+  el.deductibleInput.value = preset.deductible;
+  el.payoutCapInput.value = preset.payoutCap;
+  log(`Applied ${type.toUpperCase()} presentation preset.`);
+  scheduleLiveChartRefresh();
 }
 
 function renderPills(container, items) {
@@ -252,6 +329,7 @@ async function connectWallet() {
   }
 
   log(`Wallet connected: ${state.account}`);
+  await scheduleLiveChartRefresh();
 }
 
 async function loadContracts() {
@@ -269,6 +347,7 @@ async function loadContracts() {
   renderNetworkStatus();
   showFeedback("success", "Contracts loaded", `Settlement asset: ${state.tokenSymbol} at ${assetAddress}`);
   log(`Contracts loaded. Settlement asset: ${state.tokenSymbol} (${assetAddress})`);
+  await scheduleLiveChartRefresh();
 }
 
 async function ensureAllowance(spender, requiredAmount) {
@@ -639,6 +718,9 @@ async function run(action) {
 }
 
 el.connectButton.addEventListener("click", () => run(connectWallet));
+el.presetUsButton.addEventListener("click", () => applyPreset("us"));
+el.presetHkButton.addEventListener("click", () => applyPreset("hk"));
+el.presetMockButton.addEventListener("click", () => applyPreset("mock"));
 el.saveAddressesButton.addEventListener("click", () => run(loadContracts));
 el.quoteButton.addEventListener("click", () => run(getQuote));
 el.buyButton.addEventListener("click", () => run(buyPolicy));
@@ -648,6 +730,7 @@ el.loadPoliciesButton.addEventListener("click", () => run(loadPolicies));
 el.depositButton.addEventListener("click", () => run(depositLiquidity));
 el.withdrawButton.addEventListener("click", () => run(withdrawLiquidity));
 el.vaultStateButton.addEventListener("click", () => run(refreshVaultState));
+el.symbolInput.addEventListener("change", () => run(scheduleLiveChartRefresh));
 
 run(async () => {
   if (!window.location.protocol.startsWith("http")) {
@@ -655,4 +738,5 @@ run(async () => {
   }
 
   el.deploymentStatus.textContent = "Connect a wallet to auto-load network-specific addresses.";
+  drawCandlestickChart(el.livePriceChart, [], "Intraday candles");
 });

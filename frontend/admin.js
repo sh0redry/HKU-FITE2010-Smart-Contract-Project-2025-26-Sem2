@@ -4,6 +4,7 @@ import {
   vaultAbi,
   oracleAbi,
   erc20Abi,
+  mockPriceFeedAbi,
   policyFactoryInterface,
   vaultInterface,
   oracleInterface,
@@ -12,6 +13,8 @@ import {
   loadDeploymentByChain,
   decodeError
 } from "./shared.js";
+import { MARKET_SCENARIOS } from "./scenarios.js";
+import { drawCandlestickChart, fetchMarketCandles, summarizeCandles, getRefreshIntervalMs } from "./live-market.js";
 
 const state = {
   provider: null,
@@ -21,7 +24,10 @@ const state = {
   tokenSymbol: "USDC",
   deployment: null,
   network: null,
-  contracts: {}
+  contracts: {},
+  mockScenarioIndex: 0,
+  mockAutoplayHandle: null,
+  liveChartTimer: null
 };
 
 const el = {
@@ -35,6 +41,8 @@ const el = {
   monitorSymbol: document.getElementById("monitorSymbol"),
   refreshDashboardButton: document.getElementById("refreshDashboardButton"),
   dashboardOutput: document.getElementById("dashboardOutput"),
+  liveAdminChartStatus: document.getElementById("liveAdminChartStatus"),
+  adminLivePriceChart: document.getElementById("adminLivePriceChart"),
   pauseReasonInput: document.getElementById("pauseReasonInput"),
   closureDateInput: document.getElementById("closureDateInput"),
   calendarTypeInput: document.getElementById("calendarTypeInput"),
@@ -75,6 +83,12 @@ const el = {
   oracleAdapterInput: document.getElementById("oracleAdapterInput"),
   setRiskProviderButton: document.getElementById("setRiskProviderButton"),
   setOracleAdapterButton: document.getElementById("setOracleAdapterButton"),
+  mockPlaybackMsInput: document.getElementById("mockPlaybackMsInput"),
+  loadMockScenarioButton: document.getElementById("loadMockScenarioButton"),
+  prevMockCandleButton: document.getElementById("prevMockCandleButton"),
+  nextMockCandleButton: document.getElementById("nextMockCandleButton"),
+  autoplayMockButton: document.getElementById("autoplayMockButton"),
+  mockScenarioOutput: document.getElementById("mockScenarioOutput"),
   logOutput: document.getElementById("logOutput")
 };
 
@@ -110,6 +124,76 @@ function parseBool(value) {
   return value === "true";
 }
 
+async function refreshAdminLiveChart() {
+  const symbol = el.monitorSymbol.value;
+
+  try {
+    const candles = await fetchMarketCandles(symbol, state.deployment);
+    drawCandlestickChart(el.adminLivePriceChart, candles, `${symbol} intraday candles`);
+    el.liveAdminChartStatus.textContent = summarizeCandles(candles);
+  } catch (error) {
+    drawCandlestickChart(el.adminLivePriceChart, [], `${symbol} intraday candles`);
+    el.liveAdminChartStatus.textContent = error.message;
+  }
+}
+
+async function scheduleAdminLiveChartRefresh() {
+  if (state.liveChartTimer) {
+    clearInterval(state.liveChartTimer);
+  }
+
+  await refreshAdminLiveChart();
+  const refreshIntervalMs = await getRefreshIntervalMs();
+  state.liveChartTimer = setInterval(() => {
+    refreshAdminLiveChart();
+  }, refreshIntervalMs);
+}
+
+function getMockScenario() {
+  return MARKET_SCENARIOS.MOCK || [];
+}
+
+function renderMockScenarioStatus(extra = "") {
+  const path = getMockScenario();
+  const current = path[state.mockScenarioIndex];
+  const feedAddress = state.deployment?.markets?.MOCK?.spotFeed || "not deployed";
+
+  if (!current) {
+    el.mockScenarioOutput.textContent = "MOCK scenario unavailable.";
+    return;
+  }
+
+  el.mockScenarioOutput.textContent =
+    `feedAddress: ${feedAddress}\n` +
+    `step: ${state.mockScenarioIndex + 1} / ${path.length}\n` +
+    `date: ${current.date}\n` +
+    `price: ${current.price}\n` +
+    `features: month-long path with range, rally, selloff, rebound\n` +
+    (extra ? `note: ${extra}\n` : "");
+}
+
+async function pushMockCandle(index, note = "") {
+  requireWallet();
+  requireContracts();
+
+  const feedAddress = state.deployment?.markets?.MOCK?.spotFeed;
+  if (!feedAddress) {
+    throw new Error("MOCK feed not found in deployment metadata.");
+  }
+
+  const path = getMockScenario();
+  const safeIndex = Math.max(0, Math.min(index, path.length - 1));
+  const candle = path[safeIndex];
+  const mockFeed = new ethers.Contract(feedAddress, mockPriceFeedAbi, state.signer);
+  const scaledPrice = BigInt(Math.round(candle.price * 1e8));
+  const tx = await mockFeed.setAnswer(scaledPrice);
+  log(`MOCK candle submitted: ${tx.hash}`);
+  await tx.wait();
+  state.mockScenarioIndex = safeIndex;
+  renderMockScenarioStatus(note || "On-chain MOCK feed updated.");
+  log(`MOCK moved to step ${safeIndex + 1} (${candle.date}, ${candle.price}).`);
+}
+
 async function connectWallet() {
   if (!window.ethereum) {
     throw new Error("MetaMask or another injected wallet is required.");
@@ -133,6 +217,7 @@ async function connectWallet() {
   }
 
   log(`Wallet connected: ${state.account}`);
+  await scheduleAdminLiveChartRefresh();
 }
 
 function renderRoleHints() {
@@ -164,6 +249,7 @@ async function loadContracts() {
   el.riskProviderInput.value = await state.contracts.oracle.riskParameterProvider();
   el.oracleAdapterInput.value = await state.contracts.oracle.oracleAdapter();
   log(`Contracts loaded. Settlement asset: ${state.tokenSymbol} (${assetAddress})`);
+  await scheduleAdminLiveChartRefresh();
 }
 
 async function refreshDashboard() {
@@ -420,6 +506,50 @@ async function setOracleAdapter() {
   log("Oracle adapter updated.");
 }
 
+async function loadMockScenario() {
+  state.mockScenarioIndex = 0;
+  renderMockScenarioStatus("Loaded local MOCK path.");
+  if (state.deployment?.markets?.MOCK?.spotFeed) {
+    await pushMockCandle(0, "Reset MOCK feed to the first candle.");
+  }
+}
+
+async function shiftMockCandle(delta) {
+  await pushMockCandle(state.mockScenarioIndex + delta);
+}
+
+async function autoplayMockScenario() {
+  const path = getMockScenario();
+  const delayMs = Math.max(50, Number(el.mockPlaybackMsInput.value || 300));
+
+  if (state.mockAutoplayHandle) {
+    clearTimeout(state.mockAutoplayHandle);
+    state.mockAutoplayHandle = null;
+    renderMockScenarioStatus("Autoplay stopped.");
+    log("Stopped MOCK autoplay.");
+    return;
+  }
+
+  const playStep = async () => {
+    await pushMockCandle(state.mockScenarioIndex, "Autoplaying MOCK month.");
+    if (state.mockScenarioIndex >= path.length - 1) {
+      clearTimeout(state.mockAutoplayHandle);
+      state.mockAutoplayHandle = null;
+      renderMockScenarioStatus("Autoplay finished.");
+      log("Completed MOCK autoplay.");
+      return;
+    }
+
+    state.mockScenarioIndex += 1;
+    state.mockAutoplayHandle = setTimeout(() => {
+      run(playStep);
+    }, delayMs);
+  };
+
+  log("Starting MOCK autoplay.");
+  await playStep();
+}
+
 async function run(action) {
   try {
     await action();
@@ -432,6 +562,7 @@ async function run(action) {
 el.connectButton.addEventListener("click", () => run(connectWallet));
 el.loadContractsButton.addEventListener("click", () => run(loadContracts));
 el.refreshDashboardButton.addEventListener("click", () => run(refreshDashboard));
+el.monitorSymbol.addEventListener("change", () => run(scheduleAdminLiveChartRefresh));
 el.pauseUnderwritingButton.addEventListener("click", () => run(() => setUnderwritingPaused(true)));
 el.unpauseUnderwritingButton.addEventListener("click", () => run(unpauseUnderwriting));
 el.pauseQuotingButton.addEventListener("click", () => run(pauseQuoting));
@@ -442,6 +573,10 @@ el.setSymbolLimitButton.addEventListener("click", () => run(setSymbolLimit));
 el.configureMarketButton.addEventListener("click", () => run(configureMarket));
 el.setRiskProviderButton.addEventListener("click", () => run(setRiskProvider));
 el.setOracleAdapterButton.addEventListener("click", () => run(setOracleAdapter));
+el.loadMockScenarioButton.addEventListener("click", () => run(loadMockScenario));
+el.prevMockCandleButton.addEventListener("click", () => run(() => shiftMockCandle(-1)));
+el.nextMockCandleButton.addEventListener("click", () => run(() => shiftMockCandle(1)));
+el.autoplayMockButton.addEventListener("click", () => run(autoplayMockScenario));
 
 run(async () => {
   if (!window.location.protocol.startsWith("http")) {
@@ -456,5 +591,7 @@ run(async () => {
     el.oracleAddress.value = state.deployment.contracts.pricingOracle;
     renderRoleHints();
     log("Loaded local deployment addresses and admin account hints.");
+    renderMockScenarioStatus("Local MOCK presentation path ready.");
+    drawCandlestickChart(el.adminLivePriceChart, [], "Intraday candles");
   }
 });

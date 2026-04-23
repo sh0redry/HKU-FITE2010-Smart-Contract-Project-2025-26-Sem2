@@ -21,6 +21,16 @@
         This page is for `governor`, `riskManager`, `oracleManager`, and `pauser` wallets. Use it to monitor vault and exposure
         state, pause underwriting, adjust risk limits, govern supported markets, and manage calendar closures.
       </p>
+      <div class="demo-strip">
+        <div>
+          <strong>Defense Runbook</strong>
+          <p>1. Connect admin wallet. 2. Refresh dashboard. 3. Show risk limits and session windows. 4. Use MOCK controls to fast-forward a month of candles.</p>
+        </div>
+        <div>
+          <strong>Live Demo Focus</strong>
+          <p>Buyer page handles purchase and policy status. This console handles monitoring, governance, and the accelerated MOCK market presentation.</p>
+        </div>
+      </div>
       <button id="connectButton">Connect Wallet</button>
       <p id="walletStatus" class="muted">Wallet not connected.</p>
       <div class="pill-list" id="roleHints"></div>
@@ -50,11 +60,14 @@
               <option value="0700HK">0700HK</option>
               <option value="9988HK">9988HK</option>
               <option value="0005HK">0005HK</option>
+              <option value="MOCK">MOCK</option>
             </select>
           </label>
         </div>
         <button id="refreshDashboardButton">Refresh Dashboard</button>
         <pre id="dashboardOutput">Dashboard not loaded.</pre>
+        <p id="liveAdminChartStatus" class="muted">Load contracts to start intraday monitoring.</p>
+        <canvas id="adminLivePriceChart" width="520" height="220"></canvas>
       </section>
 
       <section class="card">
@@ -113,6 +126,7 @@
               <option value="0700HK">0700HK</option>
               <option value="9988HK">9988HK</option>
               <option value="0005HK">0005HK</option>
+              <option value="MOCK">MOCK</option>
             </select>
           </label>
           <label>Exposure Limit (USDC) <input id="symbolLimitInput" type="number" value="250000" /></label>
@@ -129,12 +143,13 @@
             <option value="AAPL">AAPL</option>
             <option value="TSLA">TSLA</option>
             <option value="NVDA">NVDA</option>
-            <option value="MSFT">MSFT</option>
-            <option value="0700HK">0700HK</option>
-            <option value="9988HK">9988HK</option>
-            <option value="0005HK">0005HK</option>
-          </select>
-        </label>
+              <option value="MSFT">MSFT</option>
+              <option value="0700HK">0700HK</option>
+              <option value="9988HK">9988HK</option>
+              <option value="0005HK">0005HK</option>
+              <option value="MOCK">MOCK</option>
+            </select>
+          </label>
         <label>Base Premium Bps <input id="basePremiumInput" type="number" value="150" /></label>
         <label>Max Notional (USDC) <input id="maxNotionalInput" type="number" value="50000" /></label>
         <label>Min Trigger Bps <input id="minTriggerInput" type="number" value="500" /></label>
@@ -188,6 +203,20 @@
         <button id="setRiskProviderButton">Set Risk Provider</button>
         <button id="setOracleAdapterButton">Set Oracle Adapter</button>
       </div>
+    </section>
+
+    <section class="card">
+      <h2>MOCK Presentation Controls</h2>
+      <div class="form-grid">
+        <label>Playback Speed (ms) <input id="mockPlaybackMsInput" type="number" value="300" min="50" step="50" /></label>
+      </div>
+      <div class="actions">
+        <button id="loadMockScenarioButton">Load MOCK Scenario</button>
+        <button id="prevMockCandleButton">Previous Candle</button>
+        <button id="nextMockCandleButton">Next Candle</button>
+        <button id="autoplayMockButton">Autoplay MOCK Month</button>
+      </div>
+      <pre id="mockScenarioOutput">MOCK scenario controls idle.</pre>
     </section>
 
     <section class="card">

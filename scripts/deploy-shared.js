@@ -44,6 +44,8 @@ function marketSeedDataForEnv(ethers, deployer, getFeedFactory, envLabel) {
   return {
     AAPL: {
       createFeed: () => getFeedFactory().deploy(185n * 10n ** 8n, 8, deployer.address),
+      yfinanceSymbol: "AAPL",
+      alphaVantageSymbol: "AAPL",
       basePremiumBps: 150,
       calendarType: CALENDAR_US,
       enforceMarketHours: usHours,
@@ -55,6 +57,8 @@ function marketSeedDataForEnv(ethers, deployer, getFeedFactory, envLabel) {
     },
     TSLA: {
       createFeed: () => getFeedFactory().deploy(172n * 10n ** 8n, 8, deployer.address),
+      yfinanceSymbol: "TSLA",
+      alphaVantageSymbol: "TSLA",
       basePremiumBps: 190,
       calendarType: CALENDAR_US,
       enforceMarketHours: usHours,
@@ -66,6 +70,8 @@ function marketSeedDataForEnv(ethers, deployer, getFeedFactory, envLabel) {
     },
     NVDA: {
       createFeed: () => getFeedFactory().deploy(890n * 10n ** 8n, 8, deployer.address),
+      yfinanceSymbol: "NVDA",
+      alphaVantageSymbol: "NVDA",
       basePremiumBps: 175,
       calendarType: CALENDAR_US,
       enforceMarketHours: usHours,
@@ -77,6 +83,8 @@ function marketSeedDataForEnv(ethers, deployer, getFeedFactory, envLabel) {
     },
     MSFT: {
       createFeed: () => getFeedFactory().deploy(415n * 10n ** 8n, 8, deployer.address),
+      yfinanceSymbol: "MSFT",
+      alphaVantageSymbol: "MSFT",
       basePremiumBps: 135,
       calendarType: CALENDAR_US,
       enforceMarketHours: usHours,
@@ -88,6 +96,8 @@ function marketSeedDataForEnv(ethers, deployer, getFeedFactory, envLabel) {
     },
     "0700HK": {
       createFeed: () => getFeedFactory().deploy(320n * 10n ** 8n, 8, deployer.address),
+      yfinanceSymbol: "0700.HK",
+      alphaVantageSymbol: "0700.HKG",
       basePremiumBps: 160,
       calendarType: CALENDAR_HK,
       enforceMarketHours: hkHours,
@@ -99,6 +109,8 @@ function marketSeedDataForEnv(ethers, deployer, getFeedFactory, envLabel) {
     },
     "9988HK": {
       createFeed: () => getFeedFactory().deploy(92n * 10n ** 8n, 8, deployer.address),
+      yfinanceSymbol: "9988.HK",
+      alphaVantageSymbol: "9988.HKG",
       basePremiumBps: 170,
       calendarType: CALENDAR_HK,
       enforceMarketHours: hkHours,
@@ -110,6 +122,8 @@ function marketSeedDataForEnv(ethers, deployer, getFeedFactory, envLabel) {
     },
     "0005HK": {
       createFeed: () => getFeedFactory().deploy(64n * 10n ** 8n, 8, deployer.address),
+      yfinanceSymbol: "0005.HK",
+      alphaVantageSymbol: "0005.HKG",
       basePremiumBps: 140,
       calendarType: CALENDAR_HK,
       enforceMarketHours: hkHours,
@@ -117,6 +131,19 @@ function marketSeedDataForEnv(ethers, deployer, getFeedFactory, envLabel) {
         impliedVolBps: 2200, downsideSkewBps: 95, upsideSkewBps: 80, shortTermMultiplierBps: 10080,
         mediumTermMultiplierBps: 9920, longTermMultiplierBps: 9680, downsideInventoryPressureBps: 52,
         upsideInventoryPressureBps: 32, stressPremiumBps: 38, riskScoreBps: 5200, sourceTag: sourceHk
+      })
+    },
+    MOCK: {
+      createFeed: () => getFeedFactory().deploy(100n * 10n ** 8n, 8, deployer.address),
+      yfinanceSymbol: "MOCK",
+      alphaVantageSymbol: "MOCK",
+      basePremiumBps: 145,
+      calendarType: 0,
+      enforceMarketHours: false,
+      riskSnapshot: riskSnapshot(ethers, {
+        impliedVolBps: 3400, downsideSkewBps: 145, upsideSkewBps: 125, shortTermMultiplierBps: 10450,
+        mediumTermMultiplierBps: 10180, longTermMultiplierBps: 9900, downsideInventoryPressureBps: 95,
+        upsideInventoryPressureBps: 70, stressPremiumBps: 62, riskScoreBps: 6800, sourceTag: "MOCK_DEMO"
       })
     }
   };
@@ -240,6 +267,8 @@ async function deployStack(hre, options = {}) {
           symbol,
           {
             spotFeed: await marketSeedData[symbol].spot.getAddress(),
+            yfinanceSymbol: marketSeedData[symbol].yfinanceSymbol,
+            alphaVantageSymbol: marketSeedData[symbol].alphaVantageSymbol,
             enforceMarketHours: marketSeedData[symbol].enforceMarketHours,
             calendarType: marketSeedData[symbol].calendarType,
             riskSnapshot: marketSeedData[symbol].riskSnapshot

@@ -126,6 +126,11 @@ export const erc20Abi = [
   "function symbol() view returns (string)"
 ];
 
+export const mockPriceFeedAbi = [
+  "function setAnswer(int256 newAnswer)",
+  "function latestRoundData() view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)"
+];
+
 export const policyFactoryInterface = new ethers.Interface(policyFactoryAbi);
 export const oracleInterface = new ethers.Interface(oracleAbi);
 export const vaultInterface = new ethers.Interface(vaultAbi);

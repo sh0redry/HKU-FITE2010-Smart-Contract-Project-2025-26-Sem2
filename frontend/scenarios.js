@@ -96,6 +96,20 @@ export const MARKET_CONFIGS = {
     stressPremiumBps: 38,
     riskScoreBps: 5200,
     startPrice: 64
+  },
+  MOCK: {
+    basePremiumBps: 145,
+    annualVolBps: 3400,
+    downsideSkewBps: 145,
+    upsideSkewBps: 125,
+    shortTermMultiplierBps: 10450,
+    mediumTermMultiplierBps: 10180,
+    longTermMultiplierBps: 9900,
+    downsideInventoryPressureBps: 95,
+    upsideInventoryPressureBps: 70,
+    stressPremiumBps: 62,
+    riskScoreBps: 6800,
+    startPrice: 100
   }
 };
 
@@ -176,5 +190,37 @@ export const MARKET_SCENARIOS = {
     { date: "2025-01-10", price: 63.8 },
     { date: "2025-01-13", price: 64.6 },
     { date: "2025-01-14", price: 65.3 }
+  ],
+  MOCK: [
+    { date: "2025-01-02", price: 100 },
+    { date: "2025-01-03", price: 101.2 },
+    { date: "2025-01-06", price: 99.8 },
+    { date: "2025-01-07", price: 100.4 },
+    { date: "2025-01-08", price: 98.9 },
+    { date: "2025-01-09", price: 99.7 },
+    { date: "2025-01-10", price: 101.5 },
+    { date: "2025-01-13", price: 103.4 },
+    { date: "2025-01-14", price: 105.8 },
+    { date: "2025-01-15", price: 108.3 },
+    { date: "2025-01-16", price: 111.1 },
+    { date: "2025-01-17", price: 114.9 },
+    { date: "2025-01-20", price: 118.6 },
+    { date: "2025-01-21", price: 121.7 },
+    { date: "2025-01-22", price: 124.5 },
+    { date: "2025-01-23", price: 121.3 },
+    { date: "2025-01-24", price: 117.8 },
+    { date: "2025-01-27", price: 112.4 },
+    { date: "2025-01-28", price: 106.9 },
+    { date: "2025-01-29", price: 101.2 },
+    { date: "2025-01-30", price: 96.1 },
+    { date: "2025-01-31", price: 92.4 },
+    { date: "2025-02-03", price: 88.6 },
+    { date: "2025-02-04", price: 86.2 },
+    { date: "2025-02-05", price: 89.7 },
+    { date: "2025-02-06", price: 93.5 },
+    { date: "2025-02-07", price: 97.9 },
+    { date: "2025-02-10", price: 102.8 },
+    { date: "2025-02-11", price: 106.1 },
+    { date: "2025-02-12", price: 109.6 }
   ]
 };

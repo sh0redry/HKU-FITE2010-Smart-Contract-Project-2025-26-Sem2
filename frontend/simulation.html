@@ -21,6 +21,16 @@
         This page does not send transactions. It mirrors the contract terms off-chain so you can quickly estimate trigger rates,
         payouts, pool revenue, and underwriting performance across multiple policies.
       </p>
+      <div class="demo-strip">
+        <div>
+          <strong>Defense Path</strong>
+          <p>Use this page when you need a deterministic presentation. The MOCK symbol replays a month of candles in seconds and shows whether policies would have paid out.</p>
+        </div>
+        <div class="inline-actions">
+          <button id="loadMockPackButton" type="button">Load MOCK Presentation Pack</button>
+          <button id="playMockTimelineButton" type="button">Play MOCK Timeline</button>
+        </div>
+      </div>
     </section>
 
     <section class="grid">
@@ -35,6 +45,7 @@
             <option value="0700HK">0700HK</option>
             <option value="9988HK">9988HK</option>
             <option value="0005HK">0005HK</option>
+            <option value="MOCK">MOCK</option>
           </select>
         </label>
         <label>Direction
@@ -74,6 +85,11 @@
     <section class="card">
       <h2>Simulation Result</h2>
       <pre id="simulationOutput">No simulation run yet.</pre>
+    </section>
+
+    <section class="card">
+      <h2>MOCK Timeline Playback</h2>
+      <pre id="mockPlaybackOutput">No MOCK playback started.</pre>
     </section>
   </main>
 

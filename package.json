@@ -14,7 +14,10 @@
     "deploy:demo": "hardhat run scripts/deploy-demo.js --network localhost",
     "deploy:sepolia": "hardhat run scripts/deploy-testnet.js --network sepolia",
     "deploy:base-sepolia": "hardhat run scripts/deploy-testnet.js --network baseSepolia",
-    "gas:report": "hardhat run scripts/gas-report.js"
+    "gas:report": "hardhat run scripts/gas-report.js",
+    "sync:market": "hardhat run scripts/sync-market-data.js --network localhost",
+    "sync:market:sepolia": "hardhat run scripts/sync-market-data.js --network sepolia",
+    "build:runtime-config": "node scripts/export-runtime-config.js"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",

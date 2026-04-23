@@ -519,6 +519,7 @@ describe("Phase 8 Governance And Multi-Market Lifecycle", function () {
     const { lp, buyer, mockUsdc, insuranceVault, policyFactory } = await loadFixture(deployFixture);
 
     await approveAndDeposit(mockUsdc, insuranceVault, lp, ethers.parseUnits("20000", USDC_DECIMALS));
+    await time.increaseTo(utcTimestamp(2026, 6, 15, 1, 45));
 
     const quote = await policyFactory.previewPolicy(
       HK_0700,

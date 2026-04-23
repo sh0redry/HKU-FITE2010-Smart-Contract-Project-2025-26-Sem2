@@ -17,9 +17,12 @@ const el = {
   simStartIndex: document.getElementById("simStartIndex"),
   addPolicyButton: document.getElementById("addPolicyButton"),
   runSimulationButton: document.getElementById("runSimulationButton"),
+  loadMockPackButton: document.getElementById("loadMockPackButton"),
+  playMockTimelineButton: document.getElementById("playMockTimelineButton"),
   scenarioOutput: document.getElementById("scenarioOutput"),
   policiesQueueOutput: document.getElementById("policiesQueueOutput"),
-  simulationOutput: document.getElementById("simulationOutput")
+  simulationOutput: document.getElementById("simulationOutput"),
+  mockPlaybackOutput: document.getElementById("mockPlaybackOutput")
 };
 
 function updateScenarioPreview(symbol) {
@@ -160,6 +163,61 @@ function refreshQueue() {
   el.policiesQueueOutput.textContent = policies.length === 0 ? "No policies queued." : JSON.stringify(policies, null, 2);
 }
 
+function loadMockPresentationPack() {
+  policies.length = 0;
+  policies.push(
+    {
+      symbol: "MOCK",
+      direction: "down",
+      triggerBps: 1500,
+      notional: 1500,
+      deductible: 25,
+      payoutCap: 800,
+      durationSteps: 20,
+      startIndex: 0
+    },
+    {
+      symbol: "MOCK",
+      direction: "up",
+      triggerBps: 1000,
+      notional: 1200,
+      deductible: 10,
+      payoutCap: 500,
+      durationSteps: 12,
+      startIndex: 3
+    }
+  );
+
+  el.simSymbol.value = "MOCK";
+  el.simDirection.value = "down";
+  el.simTrigger.value = "1500";
+  el.simNotional.value = "1500";
+  el.simDeductible.value = "25";
+  el.simPayoutCap.value = "800";
+  el.simDuration.value = "20";
+  el.simStartIndex.value = "0";
+  refreshQueue();
+  updateScenarioPreview("MOCK");
+}
+
+async function playMockTimeline() {
+  const path = MARKET_SCENARIOS.MOCK;
+  if (!path) {
+    el.mockPlaybackOutput.textContent = "MOCK scenario unavailable.";
+    return;
+  }
+
+  const lines = [];
+  for (let index = 0; index < path.length; index += 1) {
+    const candle = path[index];
+    lines.push(`step ${index + 1}/${path.length} | ${candle.date} | ${candle.price}`);
+    el.mockPlaybackOutput.textContent = lines.join("\n");
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  }
+
+  el.mockPlaybackOutput.textContent += "\n\nMOCK month replay finished.";
+}
+
 function addPolicy() {
   const symbol = el.simSymbol.value;
   const policy = {
@@ -181,5 +239,7 @@ function addPolicy() {
 el.simSymbol.addEventListener("change", () => updateScenarioPreview(el.simSymbol.value));
 el.addPolicyButton.addEventListener("click", addPolicy);
 el.runSimulationButton.addEventListener("click", runScenario);
+el.loadMockPackButton.addEventListener("click", loadMockPresentationPack);
+el.playMockTimelineButton.addEventListener("click", playMockTimeline);
 
 updateScenarioPreview(el.simSymbol.value);

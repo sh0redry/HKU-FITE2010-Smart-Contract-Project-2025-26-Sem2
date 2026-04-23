@@ -40,6 +40,8 @@ The current whitelist includes:
   - `0700HK`
   - `9988HK`
   - `0005HK`
+- Presentation-only demo market:
+  - `MOCK`
 
 ### Supported policy types
 
@@ -174,6 +176,22 @@ The oracle path is abstracted through `IOracleAdapter`.
 - quoting and settlement revert if no valid source is available
 - some markets can explicitly reject fallback usage
 
+### Live market data sync
+
+The repo now includes a provider-switchable free-data sync path. The default provider is `yfinance`, while `Alpha Vantage` remains available as a fallback option:
+
+- `scripts/sync-market-data.js`
+- `scripts/market-data-utils.js`
+
+The sync flow is:
+
+1. fetch the latest daily close for supported U.S. and Hong Kong symbols from the configured provider
+2. estimate a lightweight realized-volatility snapshot from recent history
+3. push the latest price into the deployed `MockPriceFeed`
+4. push a refreshed `RiskSnapshot` into `MockRiskParameterProvider`
+
+This keeps the on-chain contracts unchanged while still letting local, demo, and testnet deployments ingest real market data through an off-chain updater.
+
 ### Settlement behavior
 
 - if the market is open at expiry, settlement can proceed after expiry
@@ -248,6 +266,7 @@ This page supports:
 
 - wallet connection
 - chain-aware deployment loading
+- presentation presets for U.S., Hong Kong, and `MOCK` demo flows
 - quote generation
 - policy purchase
 - cancellation
@@ -265,6 +284,7 @@ This page supports:
 
 - role-aware operational use
 - exposure and vault monitoring
+- accelerated `MOCK` market playback controls for presentation demos
 - pause and unpause actions
 - risk-limit updates
 - symbol exposure limit updates
@@ -280,6 +300,8 @@ This page supports:
 
 - off-chain scenario replay
 - multiple-policy batch simulation
+- one-click `MOCK` presentation pack loading
+- accelerated month-long `MOCK` timeline playback
 - sample path underwriting analysis
 - payout and revenue inspection without sending transactions
 
@@ -406,6 +428,19 @@ These documents summarize:
 npm install
 ```
 
+### 1.5 Configure market-data credentials for live intraday charts
+
+1. copy `.env.example` to `.env`
+2. set `MARKET_DATA_PROVIDER=yfinance` for the default Yahoo Finance path, or switch to `alpha-vantage` if you prefer that provider
+3. if you use `alpha-vantage`, fill in `ALPHA_VANTAGE_API_KEY`
+3. export a browser-readable runtime config:
+
+```bash
+npm run build:runtime-config
+```
+
+This generates `frontend/runtime-config.json`, which is used by the buyer and admin pages to fetch intraday candles for the currently selected stock. The same provider setting is also reused by the off-chain sync script.
+
 ### 2. Run tests
 
 ```bash
@@ -444,6 +479,14 @@ Serve the project over HTTP and open:
 
 The buyer and admin frontends will try to auto-load the appropriate deployment file for the connected chain.
 
+### 6. Sync live market data into the local/testnet feeds
+
+```bash
+npm run sync:market
+```
+
+This command expects `ALPHA_VANTAGE_API_KEY` to be available in your shell or `.env`.
+
 ## Useful Commands
 
 ```bash
@@ -459,6 +502,9 @@ npm run deploy:demo
 npm run deploy:sepolia
 npm run deploy:base-sepolia
 npm run gas:report
+npm run sync:market
+npm run sync:market:sepolia
+npm run build:runtime-config
 ```
 
 ## Current Implementation Boundaries
@@ -469,7 +515,9 @@ Important current boundaries:
 
 - settlement uses the current allowed oracle spot at settlement time
 - exchange calendars are simplified rather than fully production-grade
-- live production oracle credentials and real stablecoin integrations are not bundled in-repo
+- live market data currently enters through an off-chain updater rather than a decentralized production oracle network
+- the default market-data path is `yfinance`, which is convenient for demos and coursework but is not a production oracle
+- provider symbol mappings for Hong Kong equities are configurable and may need adjustment depending on the chosen data source
 - the system has not undergone an external professional audit
 
 ## Summary
