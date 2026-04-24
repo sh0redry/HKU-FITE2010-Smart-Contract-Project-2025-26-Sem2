@@ -1,0 +1,7 @@
+{
+  "marketDataProvider": "yfinance",
+  "alphaVantageApiKey": "your_alpha_vantage_key_here",
+  "alphaVantageBaseUrl": "https://www.alphavantage.co/query",
+  "yfinanceChartBaseUrl": "https://query1.finance.yahoo.com/v8/finance/chart",
+  "refreshIntervalMs": 60000
+}
