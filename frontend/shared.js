@@ -128,6 +128,7 @@ export const erc20Abi = [
 
 export const mockPriceFeedAbi = [
   "function setAnswer(int256 newAnswer)",
+  "function setAnswerWithTimestamp(int256 newAnswer, uint256 updatedAt)",
   "function latestRoundData() view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)"
 ];
 
@@ -149,6 +150,30 @@ export function policyStatusLabel(policy, nowTimestamp) {
   if (Number(policy.status) === 1) return "Settled";
   if (Number(policy.status) === 2) return "Cancelled";
   return now >= policy.expiry ? "Expired" : "Active";
+}
+
+export function liveTriggerPreview(policy, nowTimestamp, currentSpotPrice) {
+  const statusLabel = policyStatusLabel(policy, nowTimestamp);
+
+  if (statusLabel === "Settled") {
+    return policy.payoutAmount > 0n ? "Triggered" : "Not Triggered";
+  }
+  if (statusLabel === "Cancelled") {
+    return "Cancelled";
+  }
+  if (!currentSpotPrice || currentSpotPrice <= 0n) {
+    return statusLabel === "Expired" ? "Awaiting Settlement" : "Pending";
+  }
+
+  const inTriggerZone = policy.isDownsideProtection
+    ? currentSpotPrice < policy.strikePrice
+    : currentSpotPrice > policy.strikePrice;
+
+  if (statusLabel === "Expired") {
+    return inTriggerZone ? "In Trigger Zone (Awaiting Settlement)" : "Out of Trigger Zone";
+  }
+
+  return inTriggerZone ? "In Trigger Zone" : "Not In Trigger Zone";
 }
 
 function normalizeArg(value) {

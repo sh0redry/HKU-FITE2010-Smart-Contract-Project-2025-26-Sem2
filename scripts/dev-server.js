@@ -214,6 +214,11 @@ async function waitForReceipt(txHash, attempts = 20, delayMs = 250) {
   return null;
 }
 
+async function advanceLocalTime(targetTimestamp) {
+  await rpcRequest("evm_setNextBlockTimestamp", [targetTimestamp]);
+  await rpcRequest("evm_mine", []);
+}
+
 async function syncLatestMarketPrice(symbol, provider = "yfinance") {
   const deployment = loadDeploymentMetadata();
   const market = deployment.markets?.[symbol];
@@ -257,6 +262,22 @@ async function syncLatestMarketPrice(symbol, provider = "yfinance") {
     latestTime: latest.time,
     txHash
   };
+}
+
+async function handleAdvanceTime(reqUrl, res) {
+  const timestampRaw = reqUrl.searchParams.get("timestamp");
+  const timestamp = Number(timestampRaw);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    sendJson(res, 400, { error: "Invalid timestamp query parameter." });
+    return;
+  }
+
+  try {
+    await advanceLocalTime(timestamp);
+    sendJson(res, 200, { ok: true, timestamp });
+  } catch (error) {
+    sendJson(res, 502, { error: error.message });
+  }
 }
 
 async function handleMarketCandles(reqUrl, res) {
@@ -332,6 +353,11 @@ const server = http.createServer(async (req, res) => {
 
   if (reqUrl.pathname === "/api/sync-market-price") {
     await handleSyncMarketPrice(reqUrl, res);
+    return;
+  }
+
+  if (reqUrl.pathname === "/api/advance-time") {
+    await handleAdvanceTime(reqUrl, res);
     return;
   }
 

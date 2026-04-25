@@ -1156,7 +1156,7 @@ describe("Phase 8 Governance And Multi-Market Lifecycle", function () {
     const { owner, lp, buyer, mockUsdc, insuranceVault, policyFactory } = await loadFixture(deployFixture);
     await policyFactory.connect(owner).configureRiskLimits(
       9000,
-      6000,
+      5600,
       0,
       ethers.parseUnits("1000000", USDC_DECIMALS),
       ethers.parseUnits("1000000", USDC_DECIMALS),
@@ -1216,7 +1216,7 @@ describe("Phase 8 Governance And Multi-Market Lifecycle", function () {
     await policyFactory.connect(owner).configureRiskLimits(
       9000,
       8500,
-      ethers.parseUnits("9800", USDC_DECIMALS),
+      ethers.parseUnits("9900", USDC_DECIMALS),
       ethers.parseUnits("1000000", USDC_DECIMALS),
       ethers.parseUnits("1000000", USDC_DECIMALS),
       ethers.parseUnits("1000000", USDC_DECIMALS),

@@ -240,12 +240,12 @@ function renderQueue() {
     tr.innerHTML = `
       <td><strong>${i + 1}</strong></td>
       <td><code style="color:#26d1c8">${p.symbol}</code></td>
-      <td>${p.direction === "down" ? "⬇️ Down" : "⬆️ Up"}</td>
+      <td>${p.direction === "down" ? "Downside" : "Upside"}</td>
       <td>${p.triggerBps / 100}%</td>
       <td>$${p.notional}</td>
       <td>$${p.deductible}</td>
       <td>$${p.payoutCap}</td>
-      <td>${p.durationSteps} days</td>
+      <td>${p.durationSteps} days${p.pricingTag ? `<br><span style="color:var(--warning)">${p.pricingTag}</span>` : ""}</td>
       <td>${p.startIndex}</td>
     `;
     el.policiesQueueBody.appendChild(tr);
@@ -303,9 +303,10 @@ function drawQueueCompositionChart() {
 // ── Pricing engine (mirrors contracts) ────────────────────
 function estimateProbabilityBps(annualVolBps, durationHours, triggerBps, directionalRiskBps, riskScoreBps) {
   const timeScaledVolBps = Math.floor((annualVolBps * durationHours) / YEAR_HOURS);
-  const difficulty = triggerBps + 250;
-  const raw = Math.floor(((timeScaledVolBps + directionalRiskBps + Math.floor(riskScoreBps / 10) + 300) * BPS) / difficulty);
-  return Math.max(300, Math.min(9000, raw));
+  const difficulty = triggerBps + 500;
+  const signal = timeScaledVolBps + directionalRiskBps + Math.floor(riskScoreBps / 18) + 160;
+  const raw = Math.floor((signal * BPS) / difficulty);
+  return Math.max(150, Math.min(7000, raw));
 }
 
 function utilizationSurchargeBps(utilizationBps = 3500) {
@@ -330,19 +331,39 @@ function quotePolicy(input) {
   const directionalRiskBps = input.direction === "down" ? market.downsideSkewBps : market.upsideSkewBps;
   const inventoryPressureBps = input.direction === "down" ? market.downsideInventoryPressureBps : market.upsideInventoryPressureBps;
   const termBps = termMultiplierBps(durationHours, market);
-  const probabilityBps = estimateProbabilityBps(market.annualVolBps, durationHours, input.triggerBps, directionalRiskBps, market.riskScoreBps);
   const adjustedAnnualVolBps = Math.floor((market.annualVolBps * termBps) / BPS);
-  const moveMagnitudeBps = input.triggerBps + Math.floor((adjustedAnnualVolBps * durationHours) / YEAR_HOURS);
-  const stressPremiumBps = market.stressPremiumBps + Math.floor(market.riskScoreBps / 20);
-  const totalRateBps =
-    market.basePremiumBps + directionalRiskBps + inventoryPressureBps + stressPremiumBps +
-    utilizationSurchargeBps() + Math.floor(probabilityBps / 12) +
-    Math.floor(moveMagnitudeBps / 8) + Math.floor((input.payoutCap * 1000) / input.notional);
+  const modelProbabilityBps = estimateProbabilityBps(
+    adjustedAnnualVolBps,
+    durationHours,
+    input.triggerBps,
+    directionalRiskBps,
+    market.riskScoreBps
+  );
+  const probabilityBps = input.probabilityOverrideBps ?? modelProbabilityBps;
+  const termAdjustedVolBps = Math.floor((adjustedAnnualVolBps * durationHours) / YEAR_HOURS);
+  const netPayoutRatioBps = Math.floor(((input.payoutCap - input.deductible) * BPS) / input.notional);
+  const expectedLossBps = Math.floor((probabilityBps * netPayoutRatioBps) / BPS);
+  const stressPremiumBps = market.stressPremiumBps;
+  const capitalLoadBps =
+    market.basePremiumBps +
+    Math.floor(directionalRiskBps / 5) +
+    Math.floor(inventoryPressureBps / 4) +
+    Math.floor(stressPremiumBps / 2) +
+    Math.floor(market.riskScoreBps / 160) +
+    Math.floor(utilizationSurchargeBps() / 2);
+  const probabilityLoadBps = Math.floor(probabilityBps / 30);
+  const volatilityLoadBps = Math.floor(termAdjustedVolBps / 16);
+  const profitLoadBps = Math.floor(expectedLossBps / 10) + 20;
+  const uncappedRateBps =
+    expectedLossBps + capitalLoadBps + probabilityLoadBps + volatilityLoadBps + profitLoadBps;
+  const maxInsuranceRateBps = Math.floor((netPayoutRatioBps * 62) / 100);
+  const totalRateBps = Math.min(uncappedRateBps, maxInsuranceRateBps);
 
   return {
     premium: Math.floor((input.notional * totalRateBps) / BPS),
     entryPrice, strikePrice,
     estimatedProbabilityBps: probabilityBps,
+    modelProbabilityBps,
     termStructureMultiplierBps: termBps,
     directionalRiskBps, inventoryPressureBps, stressPremiumBps,
     riskScoreBps: market.riskScoreBps
@@ -496,6 +517,7 @@ function runScenario() {
       symbol:                     policy.symbol,
       direction:                  policy.direction,
       triggerPct:                 `${policy.triggerBps / 100}%`,
+      pricingTag:                 policy.pricingTag || "Model Predicted",
       entryDate:                  path[policy.startIndex]?.date,
       exitDate:                   exitPoint.date,
       entryPrice:                 quote.entryPrice,
@@ -506,6 +528,7 @@ function runScenario() {
       triggered:                  payout > 0,
       protocolRevenue:            quote.premium - payout,
       estimatedProbabilityBps:    quote.estimatedProbabilityBps,
+      modelProbabilityBps:        quote.modelProbabilityBps,
       termStructureMultiplierBps: quote.termStructureMultiplierBps,
       directionalRiskBps:         quote.directionalRiskBps,
       inventoryPressureBps:       quote.inventoryPressureBps,
@@ -540,7 +563,7 @@ function runScenario() {
     <div class="stat-box${summary.protocolRevenue >= 0 ? " positive" : " negative"}">
       <div class="stat-label">Pool P&amp;L</div>
       <div class="stat-value">$${summary.protocolRevenue.toFixed(0)}</div>
-      <div class="stat-sub">premium − payout</div>
+      <div class="stat-sub">premium �?payout</div>
     </div>
     <div class="stat-box">
       <div class="stat-label">Premiums Earned</div>
@@ -566,15 +589,18 @@ function runScenario() {
     tr.innerHTML = `
       <td><strong>${i + 1}</strong></td>
       <td><code style="color:#26d1c8">${r.symbol}</code></td>
-      <td>${r.direction === "down" ? "⬇️ Down" : "⬆️ Up"} ${r.triggerPct}</td>
+      <td>${r.direction === "down" ? "Downside" : "Upside"} ${r.triggerPct}</td>
       <td style="font-size:12px">${r.entryDate}<br><span style="color:var(--muted)">$${r.entryPrice.toFixed(2)}</span></td>
       <td style="font-size:12px">${r.exitDate}<br><span style="color:var(--muted)">$${r.exitPrice.toFixed(2)}</span></td>
       <td style="font-family:'JetBrains Mono',monospace">$${r.strikePrice.toFixed(2)}</td>
       <td style="font-family:'JetBrains Mono',monospace;color:var(--teal)">$${r.premium.toFixed(0)}</td>
       <td style="font-family:'JetBrains Mono',monospace;color:${r.payout > 0 ? "var(--danger)" : "var(--muted)"}">$${r.payout.toFixed(0)}</td>
       <td style="font-family:'JetBrains Mono',monospace;color:${pnl >= 0 ? "var(--success)" : "var(--danger)"}">${pnl >= 0 ? "+" : ""}$${pnl.toFixed(0)}</td>
-      <td>${r.triggered ? "💥 Yes" : "✓ No"}</td>
+      <td>${r.triggered ? "Triggered" : "Not Triggered"}</td>
     `;
+    tr.children[2].innerHTML =
+      `${r.direction === "down" ? "Downside" : "Upside"} ${r.triggerPct}` +
+      `<br><span style="color:${r.pricingTag === "Model Miss / Unpriced Shock" ? "var(--warning)" : "var(--muted)"}">${r.pricingTag === "Model Miss / Unpriced Shock" ? "Model Miss" : r.pricingTag}</span>`;
     el.simResultsBody.appendChild(tr);
   });
 
@@ -615,17 +641,28 @@ function clearPolicies() {
 function loadMockPresentationPack() {
   policies.length = 0;
   policies.push(
-    { symbol: "MOCK", direction: "down", triggerBps: 1500, notional: 1500, deductible: 25, payoutCap: 800, durationSteps: 20, startIndex: 0 },
-    { symbol: "MOCK", direction: "up",   triggerBps: 1000, notional: 1200, deductible: 10, payoutCap: 500, durationSteps: 12, startIndex: 3 }
+    { symbol: "MOCK", direction: "up",   triggerBps: 500,  notional: 1200, deductible: 0,  payoutCap: 300, durationSteps: 10, startIndex: 3 },
+    { symbol: "MOCK", direction: "down", triggerBps: 1000, notional: 1300, deductible: 0,  payoutCap: 320, durationSteps: 8,  startIndex: 14 },
+    { symbol: "MOCK", direction: "down", triggerBps: 1000, notional: 1300, deductible: 0,  payoutCap: 320, durationSteps: 8,  startIndex: 14, probabilityOverrideBps: 1500, pricingTag: "Model Miss / Unpriced Shock" },
+    { symbol: "MOCK", direction: "up",   triggerBps: 2000, notional: 1480, deductible: 35, payoutCap: 520, durationSteps: 9,  startIndex: 3 },
+    { symbol: "MOCK", direction: "up",   triggerBps: 2000, notional: 1180, deductible: 20, payoutCap: 280, durationSteps: 5,  startIndex: 8 },
+    { symbol: "MOCK", direction: "up",   triggerBps: 1500, notional: 1220, deductible: 25, payoutCap: 300, durationSteps: 4,  startIndex: 20 },
+    { symbol: "MOCK", direction: "down", triggerBps: 1500, notional: 1360, deductible: 30, payoutCap: 360, durationSteps: 4,  startIndex: 14 },
+    { symbol: "MOCK", direction: "down", triggerBps: 2000, notional: 1260, deductible: 25, payoutCap: 320, durationSteps: 4,  startIndex: 18 },
+    { symbol: "MOCK", direction: "down", triggerBps: 1500, notional: 1180, deductible: 20, payoutCap: 260, durationSteps: 3,  startIndex: 23 },
+    { symbol: "MOCK", direction: "up",   triggerBps: 2000, notional: 1160, deductible: 20, payoutCap: 240, durationSteps: 3,  startIndex: 24 },
+    { symbol: "MOCK", direction: "down", triggerBps: 2000, notional: 1140, deductible: 15, payoutCap: 220, durationSteps: 3,  startIndex: 6 },
+    { symbol: "MOCK", direction: "up",   triggerBps: 2000, notional: 1240, deductible: 25, payoutCap: 320, durationSteps: 5,  startIndex: 22 },
+    { symbol: "MOCK", direction: "down", triggerBps: 1500, notional: 1200, deductible: 20, payoutCap: 280, durationSteps: 5,  startIndex: 10 }
   );
   el.simSymbol.value     = "MOCK";
   el.simDirection.value  = "down";
-  el.simTrigger.value    = "1500";
-  el.simNotional.value   = "1500";
-  el.simDeductible.value = "25";
-  el.simPayoutCap.value  = "800";
-  el.simDuration.value   = "20";
-  el.simStartIndex.value = "0";
+  el.simTrigger.value    = "1000";
+  el.simNotional.value   = "1300";
+  el.simDeductible.value = "0";
+  el.simPayoutCap.value  = "320";
+  el.simDuration.value   = "8";
+  el.simStartIndex.value = "14";
   renderQueue();
   updateScenarioPreview("MOCK");
 }
@@ -635,7 +672,7 @@ async function playMockTimeline() {
   const path = MARKET_SCENARIOS.MOCK;
   if (!path) { el.mockPlaybackOutput.textContent = "MOCK scenario unavailable."; return; }
 
-  el.timelinePill.textContent = "Playing…";
+  el.timelinePill.textContent = "Playing...";
   el.timelinePill.style.color = "#26d1c8";
   const canvas = el.mockTimelineChart;
   const lines = [];
@@ -684,9 +721,9 @@ async function playMockTimeline() {
     await new Promise(resolve => setTimeout(resolve, 120));
   }
 
-  el.timelinePill.textContent = "Done ✓";
+  el.timelinePill.textContent = "Done";
   el.timelinePill.style.color = "#00c48c";
-  el.mockPlaybackOutput.textContent += "\n\n✅ MOCK month replay complete.";
+  el.mockPlaybackOutput.textContent += "`n`nMOCK month replay complete.";
 }
 
 // ── Events ─────────────────────────────────────────────────
@@ -700,3 +737,6 @@ el.playMockTimelineButton.addEventListener("click", playMockTimeline);
 // ── Init ───────────────────────────────────────────────────
 updateScenarioPreview(el.simSymbol.value);
 renderQueue();
+
+
+

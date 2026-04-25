@@ -12,7 +12,8 @@ import {
   decodeError,
   detectNetwork,
   loadDeploymentByChain,
-  policyStatusLabel
+  policyStatusLabel,
+  liveTriggerPreview
 } from "./shared.js";
 import { drawCandlestickChart, fetchMarketCandles, summarizeCandles, getRefreshIntervalMs } from "./live-market.js";
 import { MARKET_CONFIGS, MARKET_SCENARIOS } from "./scenarios.js";
@@ -202,6 +203,14 @@ function estimateFallbackQuote(input, symbolKey) {
   };
 }
 
+async function safeGetSpotPrice(symbol) {
+  try {
+    return await state.contracts.oracle.getSpotPrice(ethers.encodeBytes32String(symbol));
+  } catch {
+    return 0n;
+  }
+}
+
 // ── Live chart ─────────────────────────────────────────────
 async function refreshLiveChart() {
   const symbol = el.symbolInput.value;
@@ -209,6 +218,9 @@ async function refreshLiveChart() {
     const candles = await fetchMarketCandles(symbol, state.deployment);
     drawCandlestickChart(el.livePriceChart, candles, `${symbol} — 1-week candles`);
     el.liveChartStatus.textContent = summarizeCandles(candles);
+    if (state.account && state.contracts.policyFactory && state.lastPolicies.length > 0) {
+      await loadPolicies();
+    }
   } catch (error) {
     drawCandlestickChart(el.livePriceChart, [], `${symbol} — 1-week candles`);
     el.liveChartStatus.textContent = error.message;
@@ -698,21 +710,26 @@ async function loadPolicies() {
   const rows = [];
   const counters = { Active: 0, Expired: 0, Settled: 0, Cancelled: 0 };
 
-  for (const id of policyIds) {
-    const policy = await state.contracts.policyFactory.getPolicy(id);
+  const policies = await Promise.all(
+    policyIds.map((id) => state.contracts.policyFactory.getPolicy(id))
+  );
+  const symbols = [...new Set(policies.map((policy) => decodeBytes32(policy.symbol)))];
+  const spotEntries = await Promise.all(
+    symbols.map(async (symbol) => {
+      const spot = await safeGetSpotPrice(symbol);
+      return [symbol, spot];
+    })
+  );
+  const spotMap = new Map(spotEntries);
+
+  for (const policy of policies) {
     const statusLabel = policyStatusLabel(policy, nowTimestamp);
-    const triggerResult =
-      statusLabel === "Settled"
-        ? (policy.payoutAmount > 0n ? "Triggered" : "Not Triggered")
-        : statusLabel === "Expired"
-          ? "Awaiting Settlement"
-          : statusLabel === "Cancelled"
-            ? "Cancelled"
-            : "Pending";
+    const symbol = decodeBytes32(policy.symbol);
+    const triggerResult = liveTriggerPreview(policy, nowTimestamp, spotMap.get(symbol) || 0n);
     counters[statusLabel] = (counters[statusLabel] || 0) + 1;
     rows.push({
       id:           policy.id.toString(),
-      symbol:       decodeBytes32(policy.symbol),
+      symbol,
       side:         policy.isDownsideProtection ? "Downside" : "Upside",
       statusLabel,
       triggerResult,

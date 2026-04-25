@@ -5,13 +5,16 @@ import {
   oracleAbi,
   erc20Abi,
   mockPriceFeedAbi,
+  decodeBytes32,
   policyFactoryInterface,
   vaultInterface,
   oracleInterface,
   erc20Interface,
   detectNetwork,
   loadDeploymentByChain,
-  decodeError
+  decodeError,
+  policyStatusLabel,
+  liveTriggerPreview
 } from "./shared.js";
 import { MARKET_SCENARIOS } from "./scenarios.js";
 import { drawCandlestickChart, fetchMarketCandles, summarizeCandles, getRefreshIntervalMs } from "./live-market.js";
@@ -26,9 +29,13 @@ const state = {
   network: null,
   contracts: {},
   mockScenarioIndex: 0,
+  mockScenarioAnchorTimestamp: 0,
   mockAutoplayHandle: null,
   liveChartTimer: null
 };
+
+const MOCK_STEP_SECONDS = 24 * 60 * 60;
+let runtimeConfigPromise = null;
 
 const el = {
   connectButton: document.getElementById("connectButton"),
@@ -41,6 +48,9 @@ const el = {
   monitorSymbol: document.getElementById("monitorSymbol"),
   refreshDashboardButton: document.getElementById("refreshDashboardButton"),
   dashboardOutput: document.getElementById("dashboardOutput"),
+  monitorHolderInput: document.getElementById("monitorHolderInput"),
+  refreshPoliciesButton: document.getElementById("refreshPoliciesButton"),
+  monitoredPoliciesOutput: document.getElementById("monitoredPoliciesOutput"),
   liveAdminChartStatus: document.getElementById("liveAdminChartStatus"),
   adminLivePriceChart: document.getElementById("adminLivePriceChart"),
   pauseReasonInput: document.getElementById("pauseReasonInput"),
@@ -95,6 +105,20 @@ const el = {
 
 function log(message) {
   el.logOutput.textContent = `[${new Date().toLocaleTimeString()}] ${message}\n${el.logOutput.textContent}`;
+}
+
+async function loadRuntimeConfig() {
+  if (!window.location.protocol.startsWith("http")) {
+    return null;
+  }
+
+  if (!runtimeConfigPromise) {
+    runtimeConfigPromise = fetch("./runtime-config.json")
+      .then((response) => (response.ok ? response.json() : null))
+      .catch(() => null);
+  }
+
+  return runtimeConfigPromise;
 }
 
 function requireWallet() {
@@ -259,6 +283,10 @@ function renderMockScenarioStatus(extra = "") {
   const path = getMockScenario();
   const current = path[state.mockScenarioIndex];
   const feedAddress = state.deployment?.markets?.MOCK?.spotFeed || "not deployed";
+  const demoTimestamp =
+    state.mockScenarioAnchorTimestamp > 0
+      ? state.mockScenarioAnchorTimestamp + state.mockScenarioIndex * MOCK_STEP_SECONDS
+      : 0;
 
   if (!current) {
     el.mockScenarioOutput.textContent = "MOCK scenario unavailable.";
@@ -268,11 +296,85 @@ function renderMockScenarioStatus(extra = "") {
   el.mockScenarioOutput.textContent =
     `feedAddress: ${feedAddress}\n` +
     `step: ${state.mockScenarioIndex + 1} / ${path.length}\n` +
-    `date: ${current.date}\n` +
+    `scenarioDateLabel: ${current.date}\n` +
+    (demoTimestamp > 0 ? `demoBlockTime: ${new Date(demoTimestamp * 1000).toLocaleString()}\n` : "") +
     `price: ${current.price}\n` +
     `features: month-long path with range, rally, selloff, rebound\n` +
     (extra ? `note: ${extra}\n` : "");
   drawMockScenarioChart();
+}
+
+async function safeGetSpotPrice(symbol) {
+  try {
+    return await state.contracts.oracle.getSpotPrice(ethers.encodeBytes32String(symbol));
+  } catch {
+    return 0n;
+  }
+}
+
+async function refreshMonitoredPolicies() {
+  requireWallet();
+  requireContracts();
+
+  const holder = el.monitorHolderInput.value.trim();
+  if (!holder) {
+    throw new Error("Enter a holder address to monitor.");
+  }
+
+  const [policyIds, latestBlock] = await Promise.all([
+    state.contracts.policyFactory.getPoliciesByHolder(holder),
+    state.provider.getBlock("latest")
+  ]);
+
+  const nowTimestamp = latestBlock.timestamp;
+  if (!policyIds.length) {
+    el.monitoredPoliciesOutput.textContent = `No policies found for ${holder}.`;
+    return;
+  }
+
+  const policies = await Promise.all(
+    policyIds.map((id) => state.contracts.policyFactory.getPolicy(id))
+  );
+
+  const monitorSymbol = el.monitorSymbol.value.trim().toUpperCase();
+  const filteredPolicies = policies.filter((policy) => decodeBytes32(policy.symbol) === monitorSymbol);
+
+  if (!filteredPolicies.length) {
+    el.monitoredPoliciesOutput.textContent = `No ${monitorSymbol} policies found for ${holder}.`;
+    return;
+  }
+
+  const symbols = [...new Set(filteredPolicies.map((policy) => decodeBytes32(policy.symbol)))];
+  const spotEntries = await Promise.all(
+    symbols.map(async (symbol) => {
+      const spot = await safeGetSpotPrice(symbol);
+      return [symbol, spot];
+    })
+  );
+  const spotMap = new Map(spotEntries);
+
+  const lines = filteredPolicies
+    .map((policy) => {
+      const symbol = decodeBytes32(policy.symbol);
+      const spot = spotMap.get(symbol) || 0n;
+      const statusLabel = policyStatusLabel(policy, nowTimestamp);
+      const triggerPreview = liveTriggerPreview(policy, nowTimestamp, spot);
+      return [
+        `policyId: ${policy.id.toString()}`,
+        `symbol: ${symbol}`,
+        `status: ${statusLabel}`,
+        `triggerPreview: ${triggerPreview}`,
+        `entryPrice: ${ethers.formatUnits(policy.entryPrice, 18)}`,
+        `strikePrice: ${ethers.formatUnits(policy.strikePrice, 18)}`,
+        `currentSpot: ${ethers.formatUnits(spot, 18)}`,
+        `expiry: ${new Date(Number(policy.expiry) * 1000).toLocaleString()}`,
+        `payout: ${ethers.formatUnits(policy.payoutAmount, state.tokenDecimals)} ${state.tokenSymbol}`
+      ].join(" | ");
+    });
+
+  el.monitoredPoliciesOutput.textContent = lines.length
+    ? lines.join("\n")
+    : `No ${monitorSymbol} policies found for ${holder}.`;
 }
 
 async function pushMockCandle(index, note = "") {
@@ -289,12 +391,29 @@ async function pushMockCandle(index, note = "") {
   const candle = path[safeIndex];
   const mockFeed = new ethers.Contract(feedAddress, mockPriceFeedAbi, state.signer);
   const scaledPrice = BigInt(Math.round(candle.price * 1e8));
-  const tx = await mockFeed.setAnswer(scaledPrice);
+  const latestBlock = await state.provider.getBlock("latest");
+  const targetTimestamp = Math.max(
+    Number(latestBlock.timestamp) + 1,
+    (state.mockScenarioAnchorTimestamp || Number(latestBlock.timestamp)) + safeIndex * MOCK_STEP_SECONDS
+  );
+
+  if (state.network?.chainId === 31337) {
+    const runtimeConfig = await loadRuntimeConfig();
+    const advanceTimePath = runtimeConfig?.advanceTimeProxyPath || "/api/advance-time";
+    const response = await fetch(`${advanceTimePath}?timestamp=${encodeURIComponent(targetTimestamp)}`);
+    const data = await response.json();
+    if (!response.ok || data.error) {
+      throw new Error(data.error || `Failed to advance local chain time (HTTP ${response.status})`);
+    }
+  }
+
+  const tx = await mockFeed.setAnswerWithTimestamp(scaledPrice, BigInt(targetTimestamp));
   log(`MOCK candle submitted: ${tx.hash}`);
   await tx.wait();
   state.mockScenarioIndex = safeIndex;
   renderMockScenarioStatus(note || "On-chain MOCK feed updated.");
-  log(`MOCK moved to step ${safeIndex + 1} (${candle.date}, ${candle.price}).`);
+  await refreshMonitoredPolicies();
+  log(`MOCK moved to step ${safeIndex + 1} (${candle.date}, ${candle.price}) at ${new Date(targetTimestamp * 1000).toLocaleString()}.`);
 }
 
 async function connectWallet() {
@@ -315,6 +434,9 @@ async function connectWallet() {
     el.policyFactoryAddress.value = deploymentResult.deployment.contracts.policyFactory;
     el.vaultAddress.value = deploymentResult.deployment.contracts.insuranceVault;
     el.oracleAddress.value = deploymentResult.deployment.contracts.pricingOracle;
+    if (!el.monitorHolderInput.value && deploymentResult.deployment.accounts?.buyer) {
+      el.monitorHolderInput.value = deploymentResult.deployment.accounts.buyer;
+    }
     renderRoleHints();
     log(`Loaded deployment addresses from ${deploymentResult.fileName}.`);
   }
@@ -352,9 +474,13 @@ async function loadContracts() {
 
   el.riskProviderInput.value = await state.contracts.oracle.riskParameterProvider();
   el.oracleAdapterInput.value = await state.contracts.oracle.oracleAdapter();
+  if (!el.monitorHolderInput.value && state.deployment?.accounts?.buyer) {
+    el.monitorHolderInput.value = state.deployment.accounts.buyer;
+  }
   log(`Contracts loaded. Settlement asset: ${state.tokenSymbol} (${assetAddress})`);
   drawMockScenarioChart();
   await scheduleAdminLiveChartRefresh();
+  await refreshMonitoredPolicies();
 }
 
 async function refreshDashboard() {
@@ -473,6 +599,7 @@ async function refreshDashboard() {
 
   el.riskProviderInput.value = riskProvider;
   el.oracleAdapterInput.value = oracleAdapter;
+  await refreshMonitoredPolicies();
   log("Dashboard refreshed.");
 }
 
@@ -612,6 +739,8 @@ async function setOracleAdapter() {
 }
 
 async function loadMockScenario() {
+  const latestBlock = await state.provider.getBlock("latest");
+  state.mockScenarioAnchorTimestamp = Number(latestBlock.timestamp);
   state.mockScenarioIndex = 0;
   renderMockScenarioStatus("Loaded local MOCK path.");
   if (state.deployment?.markets?.MOCK?.spotFeed) {
@@ -667,7 +796,11 @@ async function run(action) {
 el.connectButton.addEventListener("click", () => run(connectWallet));
 el.loadContractsButton.addEventListener("click", () => run(loadContracts));
 el.refreshDashboardButton.addEventListener("click", () => run(refreshDashboard));
-el.monitorSymbol.addEventListener("change", () => run(scheduleAdminLiveChartRefresh));
+el.refreshPoliciesButton.addEventListener("click", () => run(refreshMonitoredPolicies));
+el.monitorSymbol.addEventListener("change", () => run(async () => {
+  await scheduleAdminLiveChartRefresh();
+  await refreshMonitoredPolicies();
+}));
 el.pauseUnderwritingButton.addEventListener("click", () => run(() => setUnderwritingPaused(true)));
 el.unpauseUnderwritingButton.addEventListener("click", () => run(unpauseUnderwriting));
 el.pauseQuotingButton.addEventListener("click", () => run(pauseQuoting));

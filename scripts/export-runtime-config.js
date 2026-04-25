@@ -37,6 +37,7 @@ function main() {
     yfinanceChartBaseUrl: "https://query1.finance.yahoo.com/v8/finance/chart",
     marketDataProxyPath: "/api/market-candles",
     syncMarketPriceProxyPath: "/api/sync-market-price",
+    advanceTimeProxyPath: "/api/advance-time",
     refreshIntervalMs: 60000
   };
 

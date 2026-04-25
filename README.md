@@ -1,5 +1,9 @@
 # Stock Hedge Insurance
 
+Quick links:
+
+- [Chinese Presentation Flow](docs/PRESENTATION_FLOW_CN.md)
+
 `Stock Hedge Insurance` is a Solidity-based stock insurance and LP underwriting system. Buyers pay a premium to insure against a defined stock move over a chosen duration, while liquidity providers supply the settlement capital and earn underwriting income unless a payout is triggered.
 
 The project is built as a modular on-chain derivatives MVP with:

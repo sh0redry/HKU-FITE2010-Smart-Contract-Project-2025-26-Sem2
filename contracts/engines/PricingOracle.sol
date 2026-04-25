@@ -221,24 +221,37 @@ contract PricingOracle is IPricingEngine, AccessControl, Pausable {
             ? (spotPrice * (BPS - triggerBps)) / BPS
             : (spotPrice * (BPS + triggerBps)) / BPS;
         uint256 estimatedProbabilityBps =
-            _estimateProbabilityBps(annualVolBps, duration, triggerBps, directionalRiskBps, snapshot.riskScoreBps);
-        uint256 moveMagnitudeBps = triggerBps + (((annualVolBps * termStructureMultiplierBps) / BPS) * duration) / YEAR;
-        uint256 stressPremiumBps = snapshot.stressPremiumBps + (snapshot.riskScoreBps / 20);
+            _estimateProbabilityBps(
+                (annualVolBps * termStructureMultiplierBps) / BPS,
+                duration,
+                triggerBps,
+                directionalRiskBps,
+                snapshot.riskScoreBps
+            );
+        uint256 termAdjustedVolBps = (((annualVolBps * termStructureMultiplierBps) / BPS) * duration) / YEAR;
+        uint256 stressPremiumBps = snapshot.stressPremiumBps;
         uint256 scheduledExpiry = block.timestamp + duration;
         uint256 effectiveSettlementTime = _effectiveSettlementTimestamp(config, scheduledExpiry);
         uint256 overnightGapSurchargeBps = _crossesMarketClosure(config, currentSession, scheduledExpiry)
             ? config.overnightGapSurchargeBps
             : 0;
-        uint256 totalRateBps =
+        uint256 netPayoutRatioBps = ((payoutCap - deductible) * BPS) / notional;
+        uint256 expectedLossBps = (estimatedProbabilityBps * netPayoutRatioBps) / BPS;
+        uint256 capitalLoadBps =
             config.basePremiumBps +
-            directionalRiskBps +
-            inventoryPressureBps +
-            stressPremiumBps +
-            surchargeBps +
-            overnightGapSurchargeBps +
-            (estimatedProbabilityBps / 12) +
-            (moveMagnitudeBps / 8) +
-            ((payoutCap * 1_000) / notional);
+            (directionalRiskBps / 5) +
+            (inventoryPressureBps / 4) +
+            (stressPremiumBps / 2) +
+            (snapshot.riskScoreBps / 160) +
+            (surchargeBps / 2) +
+            overnightGapSurchargeBps;
+        uint256 probabilityLoadBps = estimatedProbabilityBps / 30;
+        uint256 volatilityLoadBps = termAdjustedVolBps / 16;
+        uint256 profitLoadBps = (expectedLossBps / 10) + 20;
+        uint256 uncappedRateBps =
+            expectedLossBps + capitalLoadBps + probabilityLoadBps + volatilityLoadBps + profitLoadBps;
+        uint256 maxInsuranceRateBps = (netPayoutRatioBps * 62) / 100;
+        uint256 totalRateBps = uncappedRateBps > maxInsuranceRateBps ? maxInsuranceRateBps : uncappedRateBps;
         uint256 premium = (notional * totalRateBps) / BPS;
 
         quote = PremiumQuote({
@@ -346,14 +359,15 @@ contract PricingOracle is IPricingEngine, AccessControl, Pausable {
         uint256 riskScoreBps
     ) internal pure returns (uint256 probabilityBps) {
         uint256 timeScaledVolBps = (annualVolBps * duration) / YEAR;
-        uint256 difficulty = uint256(triggerBps) + 250;
-        uint256 raw = ((timeScaledVolBps + directionalRiskBps + (riskScoreBps / 10) + 300) * BPS) / difficulty;
+        uint256 difficulty = uint256(triggerBps) + 500;
+        uint256 signal = timeScaledVolBps + directionalRiskBps + (riskScoreBps / 18) + 160;
+        uint256 raw = (signal * BPS) / difficulty;
 
-        if (raw < 300) {
-            return 300;
+        if (raw < 150) {
+            return 150;
         }
-        if (raw > 9_000) {
-            return 9_000;
+        if (raw > 7_000) {
+            return 7_000;
         }
         probabilityBps = raw;
     }
