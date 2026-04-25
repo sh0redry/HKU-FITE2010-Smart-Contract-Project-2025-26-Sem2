@@ -35,6 +35,8 @@ function main() {
     alphaVantageApiKey: process.env.ALPHA_VANTAGE_API_KEY || "",
     alphaVantageBaseUrl: "https://www.alphavantage.co/query",
     yfinanceChartBaseUrl: "https://query1.finance.yahoo.com/v8/finance/chart",
+    marketDataProxyPath: "/api/market-candles",
+    syncMarketPriceProxyPath: "/api/sync-market-price",
     refreshIntervalMs: 60000
   };
 

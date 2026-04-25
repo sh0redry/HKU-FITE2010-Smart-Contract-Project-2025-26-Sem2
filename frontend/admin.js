@@ -89,6 +89,7 @@ const el = {
   nextMockCandleButton: document.getElementById("nextMockCandleButton"),
   autoplayMockButton: document.getElementById("autoplayMockButton"),
   mockScenarioOutput: document.getElementById("mockScenarioOutput"),
+  mockPathChart: document.getElementById("mockPathChart"),
   logOutput: document.getElementById("logOutput")
 };
 
@@ -129,10 +130,10 @@ async function refreshAdminLiveChart() {
 
   try {
     const candles = await fetchMarketCandles(symbol, state.deployment);
-    drawCandlestickChart(el.adminLivePriceChart, candles, `${symbol} intraday candles`);
+    drawCandlestickChart(el.adminLivePriceChart, candles, `${symbol} 1-week candles`);
     el.liveAdminChartStatus.textContent = summarizeCandles(candles);
   } catch (error) {
-    drawCandlestickChart(el.adminLivePriceChart, [], `${symbol} intraday candles`);
+    drawCandlestickChart(el.adminLivePriceChart, [], `${symbol} 1-week candles`);
     el.liveAdminChartStatus.textContent = error.message;
   }
 }
@@ -153,6 +154,107 @@ function getMockScenario() {
   return MARKET_SCENARIOS.MOCK || [];
 }
 
+function drawMockScenarioChart() {
+  const canvas = el.mockPathChart;
+  if (!canvas) return;
+
+  const ctx = canvas.getContext("2d");
+  const width = canvas.width;
+  const height = canvas.height;
+  ctx.clearRect(0, 0, width, height);
+
+  const path = getMockScenario();
+  if (!path.length) {
+    ctx.fillStyle = "rgba(106,140,176,0.55)";
+    ctx.font = "13px Inter, sans-serif";
+    ctx.fillText("MOCK path unavailable.", 16, 28);
+    return;
+  }
+
+  const padL = 48;
+  const padR = 18;
+  const padT = 20;
+  const padB = 24;
+  const drawW = width - padL - padR;
+  const drawH = height - padT - padB;
+  const prices = path.map((point) => point.price);
+  const minPrice = Math.min(...prices) * 0.96;
+  const maxPrice = Math.max(...prices) * 1.04;
+  const range = Math.max(maxPrice - minPrice, 0.0001);
+  const toX = (index) => padL + (index / Math.max(path.length - 1, 1)) * drawW;
+  const toY = (price) => padT + ((maxPrice - price) / range) * drawH;
+
+  ctx.setLineDash([4, 4]);
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i += 1) {
+    const y = padT + (i / 4) * drawH;
+    const price = maxPrice - (i / 4) * (maxPrice - minPrice);
+    ctx.strokeStyle = "rgba(55,130,255,0.10)";
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(width - padR, y);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(106,140,176,0.7)";
+    ctx.font = "10px JetBrains Mono, monospace";
+    ctx.textAlign = "right";
+    ctx.fillText(`$${price.toFixed(0)}`, padL - 4, y + 3);
+  }
+  ctx.setLineDash([]);
+  ctx.textAlign = "start";
+
+  const gradient = ctx.createLinearGradient(0, padT, 0, height - padB);
+  gradient.addColorStop(0, "rgba(38,209,200,0.20)");
+  gradient.addColorStop(1, "rgba(38,209,200,0.03)");
+  ctx.beginPath();
+  ctx.moveTo(toX(0), toY(path[0].price));
+  path.forEach((point, index) => ctx.lineTo(toX(index), toY(point.price)));
+  ctx.lineTo(toX(path.length - 1), height - padB);
+  ctx.lineTo(toX(0), height - padB);
+  ctx.closePath();
+  ctx.fillStyle = gradient;
+  ctx.fill();
+
+  ctx.strokeStyle = "#26d1c8";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(toX(0), toY(path[0].price));
+  path.forEach((point, index) => ctx.lineTo(toX(index), toY(point.price)));
+  ctx.stroke();
+
+  const currentIndex = Math.max(0, Math.min(state.mockScenarioIndex, path.length - 1));
+  const current = path[currentIndex];
+  const markerX = toX(currentIndex);
+  const markerY = toY(current.price);
+
+  ctx.strokeStyle = "rgba(247,168,37,0.85)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(markerX, padT);
+  ctx.lineTo(markerX, height - padB);
+  ctx.stroke();
+
+  ctx.fillStyle = "#f7a825";
+  ctx.beginPath();
+  ctx.arc(markerX, markerY, 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "rgba(184,212,242,0.85)";
+  ctx.font = "12px Inter, sans-serif";
+  ctx.fillText("MOCK month price path", padL, 14);
+  ctx.textAlign = "right";
+  ctx.fillStyle = "#f7a825";
+  ctx.fillText(`Step ${currentIndex + 1}/${path.length}  $${current.price.toFixed(2)}`, width - padR, 14);
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(106,140,176,0.72)";
+  ctx.font = "10px Inter, sans-serif";
+  [0, Math.floor(path.length / 2), path.length - 1].forEach((index) => {
+    const point = path[index];
+    if (point) ctx.fillText(point.date, toX(index), height - 8);
+  });
+  ctx.textAlign = "start";
+}
+
 function renderMockScenarioStatus(extra = "") {
   const path = getMockScenario();
   const current = path[state.mockScenarioIndex];
@@ -170,6 +272,7 @@ function renderMockScenarioStatus(extra = "") {
     `price: ${current.price}\n` +
     `features: month-long path with range, rally, selloff, rebound\n` +
     (extra ? `note: ${extra}\n` : "");
+  drawMockScenarioChart();
 }
 
 async function pushMockCandle(index, note = "") {
@@ -217,6 +320,7 @@ async function connectWallet() {
   }
 
   log(`Wallet connected: ${state.account}`);
+  drawMockScenarioChart();
   await scheduleAdminLiveChartRefresh();
 }
 
@@ -249,6 +353,7 @@ async function loadContracts() {
   el.riskProviderInput.value = await state.contracts.oracle.riskParameterProvider();
   el.oracleAdapterInput.value = await state.contracts.oracle.oracleAdapter();
   log(`Contracts loaded. Settlement asset: ${state.tokenSymbol} (${assetAddress})`);
+  drawMockScenarioChart();
   await scheduleAdminLiveChartRefresh();
 }
 

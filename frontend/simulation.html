@@ -9,87 +9,165 @@
 <body>
   <main class="shell">
     <nav class="topnav">
-      <a href="./index.html">Manual Test</a>
-      <a class="active" href="./simulation.html">Scenario Simulator</a>
-      <a href="./admin.html">Admin Console</a>
+      <a href="./index.html">🛒 Buyer</a>
+      <a class="active" href="./simulation.html">📊 Simulator</a>
+      <a href="./admin.html">⚙️ Admin</a>
     </nav>
 
     <section class="hero">
-      <p class="eyebrow">Historical Playback</p>
-      <h1>Rapidly simulate one or more policies against sample stock paths</h1>
+      <p class="eyebrow">📊 Historical Playback</p>
+      <h1>Simulate policies against sample stock price paths</h1>
       <p class="lede">
-        This page does not send transactions. It mirrors the contract terms off-chain so you can quickly estimate trigger rates,
-        payouts, pool revenue, and underwriting performance across multiple policies.
+        No transactions required. This simulator mirrors contract pricing off-chain to estimate trigger rates,
+        payouts, pool revenue, and underwriting performance across one or more policies.
       </p>
+
       <div class="demo-strip">
         <div>
           <strong>Defense Path</strong>
-          <p>Use this page when you need a deterministic presentation. The MOCK symbol replays a month of candles in seconds and shows whether policies would have paid out.</p>
+          <p>The MOCK symbol replays a 30-day market scenario in seconds, showing which policies pay out and overall pool P&amp;L.</p>
         </div>
-        <div class="inline-actions">
-          <button id="loadMockPackButton" type="button">Load MOCK Presentation Pack</button>
-          <button id="playMockTimelineButton" type="button">Play MOCK Timeline</button>
+        <div>
+          <strong>Quick Start</strong>
+          <div class="inline-actions">
+            <button id="loadMockPackButton" type="button" class="btn-secondary">📦 Load MOCK Pack</button>
+            <button id="playMockTimelineButton" type="button">▶️ Play MOCK Timeline</button>
+          </div>
         </div>
       </div>
     </section>
 
-    <section class="grid">
+    <!-- Policy Config + Scenario Path -->
+    <div class="grid">
       <section class="card">
         <h2>Add Simulated Policy</h2>
-        <label>Symbol
-          <select id="simSymbol">
-            <option value="AAPL">AAPL</option>
-            <option value="TSLA">TSLA</option>
-            <option value="NVDA">NVDA</option>
-            <option value="MSFT">MSFT</option>
-            <option value="0700HK">0700HK</option>
-            <option value="9988HK">9988HK</option>
-            <option value="0005HK">0005HK</option>
-            <option value="MOCK">MOCK</option>
-          </select>
-        </label>
-        <label>Direction
-          <select id="simDirection">
-            <option value="down">Downside Protection</option>
-            <option value="up">Upside Protection</option>
-          </select>
-        </label>
-        <label>Trigger
-          <select id="simTrigger">
-            <option value="500">5%</option>
-            <option value="1000" selected>10%</option>
-            <option value="1500">15%</option>
-            <option value="2000">20%</option>
-          </select>
-        </label>
-        <label>Notional (USDC) <input id="simNotional" type="number" min="0" step="0.01" value="1000" /></label>
-        <label>Deductible (USDC) <input id="simDeductible" type="number" min="0" step="0.01" value="0" /></label>
-        <label>Payout Cap (USDC) <input id="simPayoutCap" type="number" min="0" step="0.01" value="500" /></label>
-        <label>Duration (Trading Steps) <input id="simDuration" type="number" min="1" step="1" value="4" /></label>
-        <label>Entry Step <input id="simStartIndex" type="number" min="0" step="1" value="0" /></label>
-        <button id="addPolicyButton">Add Policy</button>
-        <button id="runSimulationButton">Run Simulation</button>
+        <div class="form-grid">
+          <label>Symbol
+            <select id="simSymbol">
+              <option value="AAPL">AAPL</option>
+              <option value="TSLA">TSLA</option>
+              <option value="NVDA">NVDA</option>
+              <option value="MSFT">MSFT</option>
+              <option value="0700HK">0700HK</option>
+              <option value="9988HK">9988HK</option>
+              <option value="0005HK">0005HK</option>
+              <option value="MOCK" selected>MOCK</option>
+            </select>
+          </label>
+          <label>Direction
+            <select id="simDirection">
+              <option value="down">⬇️ Downside Protection</option>
+              <option value="up">⬆️ Upside Protection</option>
+            </select>
+          </label>
+          <label>Trigger
+            <select id="simTrigger">
+              <option value="500">5%</option>
+              <option value="1000" selected>10%</option>
+              <option value="1500">15%</option>
+              <option value="2000">20%</option>
+            </select>
+          </label>
+          <label>Notional (USDC) <input id="simNotional" type="number" min="0" step="0.01" value="1000" /></label>
+          <label>Deductible (USDC) <input id="simDeductible" type="number" min="0" step="0.01" value="0" /></label>
+          <label>Payout Cap (USDC) <input id="simPayoutCap" type="number" min="0" step="0.01" value="500" /></label>
+          <label>Duration (Trading Steps) <input id="simDuration" type="number" min="1" step="1" value="4" /></label>
+          <label>Entry Step <input id="simStartIndex" type="number" min="0" step="1" value="0" /></label>
+        </div>
+        <button id="addPolicyButton" class="btn-secondary">➕ Add Policy</button>
+        <button id="runSimulationButton">▶️ Run Simulation</button>
+        <button id="clearPoliciesButton" class="btn-danger" style="margin-top:6px">🗑 Clear All</button>
       </section>
 
       <section class="card">
-        <h2>Scenario Path</h2>
-        <pre id="scenarioOutput">Select or add a policy to inspect scenario data.</pre>
+        <h2>Price Path Preview</h2>
+        <canvas id="scenarioPathChart" width="500" height="200"></canvas>
+        <details style="margin-top:10px">
+          <summary style="font-size:12px;color:var(--muted);cursor:pointer;padding:6px 0">Raw scenario data</summary>
+          <pre id="scenarioOutput" style="max-height:180px">Select a symbol to preview.</pre>
+        </details>
       </section>
+    </div>
+
+    <!-- Queued Policies -->
+    <section class="card">
+      <div class="card-header">
+        <h2 style="margin:0">Queued Policies</h2>
+        <span class="pill" id="queueCountPill">0 queued</span>
+      </div>
+      <div class="chart-section" style="margin-bottom:12px">
+        <h3>Queue Composition</h3>
+        <canvas id="queueCompositionChart" width="900" height="180"></canvas>
+      </div>
+      <div class="table-shell">
+        <table class="data-table" id="policiesQueueTable">
+          <thead>
+            <tr>
+              <th>#</th><th>Symbol</th><th>Direction</th><th>Trigger</th>
+              <th>Notional</th><th>Deductible</th><th>Cap</th><th>Duration</th><th>Entry Step</th>
+            </tr>
+          </thead>
+          <tbody id="policiesQueueBody">
+            <tr><td colspan="9" class="table-empty">Add a policy above.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <pre id="policiesQueueOutput" style="display:none">No policies queued.</pre>
     </section>
 
-    <section class="card">
-      <h2>Queued Policies</h2>
-      <pre id="policiesQueueOutput">No policies queued.</pre>
+    <!-- Simulation Results -->
+    <section class="card" id="simResultCard" style="display:none">
+      <div class="card-header">
+        <h2 style="margin:0">Simulation Results</h2>
+        <span id="simStatusPill" class="pill">—</span>
+      </div>
+
+      <!-- Summary KPIs -->
+      <div class="stat-row" id="simKpiRow"></div>
+
+      <!-- Charts -->
+      <div class="grid-wide" style="margin-top:16px">
+        <div class="chart-section">
+          <h3>Price Path + Policy Triggers</h3>
+          <canvas id="simPriceChart" width="540" height="220"></canvas>
+        </div>
+        <div class="chart-section">
+          <h3>Per-Policy Premium vs Payout</h3>
+          <canvas id="simPayoutChart" width="420" height="220"></canvas>
+        </div>
+      </div>
+
+      <!-- Results table -->
+      <div class="table-shell" style="margin-top:16px">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>#</th><th>Symbol</th><th>Side</th>
+              <th>Entry</th><th>Exit</th><th>Strike</th>
+              <th>Premium</th><th>Payout</th><th>P&amp;L</th><th>Triggered</th>
+            </tr>
+          </thead>
+          <tbody id="simResultsBody"></tbody>
+        </table>
+      </div>
+
+      <details style="margin-top:12px">
+        <summary style="font-size:12px;color:var(--muted);cursor:pointer;padding:6px 0">Raw JSON output</summary>
+        <pre id="simulationOutput" style="max-height:300px">No simulation run yet.</pre>
+      </details>
     </section>
 
+    <!-- MOCK Timeline Playback -->
     <section class="card">
-      <h2>Simulation Result</h2>
-      <pre id="simulationOutput">No simulation run yet.</pre>
-    </section>
-
-    <section class="card">
-      <h2>MOCK Timeline Playback</h2>
-      <pre id="mockPlaybackOutput">No MOCK playback started.</pre>
+      <div class="card-header">
+        <h2 style="margin:0">🎬 MOCK Timeline Playback</h2>
+        <span class="pill" id="timelinePill">Idle</span>
+      </div>
+      <canvas id="mockTimelineChart" width="900" height="180"></canvas>
+      <details style="margin-top:12px">
+        <summary style="font-size:12px;color:var(--muted);cursor:pointer;padding:6px 0">Playback logs</summary>
+        <pre id="mockPlaybackOutput" style="max-height:160px;margin-top:8px">No MOCK playback started.</pre>
+      </details>
     </section>
   </main>
 

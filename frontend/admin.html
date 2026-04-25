@@ -9,71 +9,82 @@
 <body>
   <main class="shell">
     <nav class="topnav">
-      <a href="./index.html">Manual Test</a>
-      <a href="./simulation.html">Scenario Simulator</a>
-      <a class="active" href="./admin.html">Admin Console</a>
+      <a href="./index.html">🛒 Buyer</a>
+      <a href="./simulation.html">📊 Simulator</a>
+      <a class="active" href="./admin.html">⚙️ Admin</a>
     </nav>
 
     <section class="hero">
-      <p class="eyebrow">Operations Console</p>
-      <h1>Governance, monitoring, and market configuration</h1>
+      <p class="eyebrow">⚙️ Operations Console</p>
+      <h1>Governance, monitoring &amp; market configuration</h1>
       <p class="lede">
-        This page is for `governor`, `riskManager`, `oracleManager`, and `pauser` wallets. Use it to monitor vault and exposure
-        state, pause underwriting, adjust risk limits, govern supported markets, and manage calendar closures.
+        Reserved for <code>governor</code>, <code>riskManager</code>, <code>oracleManager</code>, and <code>pauser</code>
+        wallets. Monitor vault state, pause underwriting, adjust risk limits, govern supported markets,
+        and drive the MOCK presentation candles.
       </p>
+
       <div class="demo-strip">
         <div>
           <strong>Defense Runbook</strong>
-          <p>1. Connect admin wallet. 2. Refresh dashboard. 3. Show risk limits and session windows. 4. Use MOCK controls to fast-forward a month of candles.</p>
+          <p>1. Connect admin wallet → 2. Refresh dashboard → 3. Show risk limits &amp; session windows → 4. Use MOCK controls to fast-forward a 30-day candle sequence.</p>
         </div>
         <div>
-          <strong>Live Demo Focus</strong>
-          <p>Buyer page handles purchase and policy status. This console handles monitoring, governance, and the accelerated MOCK market presentation.</p>
+          <strong>Admin Wallet Hints</strong>
+          <div class="pill-list" id="roleHints"></div>
         </div>
       </div>
+
       <button id="connectButton">Connect Wallet</button>
-      <p id="walletStatus" class="muted">Wallet not connected.</p>
-      <div class="pill-list" id="roleHints"></div>
+      <p id="walletStatus" class="muted" style="margin-top:10px">Wallet not connected.</p>
+      <div id="adminFeedback" style="margin-top:12px"></div>
     </section>
 
+    <!-- Contract Addresses -->
     <section class="card">
-      <h2>Contract Addresses</h2>
+      <div class="card-header">
+        <h2 style="margin:0">Contract Addresses</h2>
+        <span class="pill" id="contractStatus">Not loaded</span>
+      </div>
       <div class="form-grid">
         <label>Policy Factory <input id="policyFactoryAddress" placeholder="0x..." /></label>
         <label>Insurance Vault <input id="vaultAddress" placeholder="0x..." /></label>
         <label>Pricing Oracle <input id="oracleAddress" placeholder="0x..." /></label>
       </div>
       <button id="loadContractsButton">Load Contracts</button>
-      <p class="muted">If `frontend/deployments/localhost.json` exists, addresses and suggested admin accounts will preload.</p>
+      <p class="muted" style="margin-top:8px;font-size:12px">
+        If <code>frontend/deployments/localhost.json</code> exists, addresses and admin account hints preload automatically.
+      </p>
     </section>
 
-    <section class="grid-wide">
+    <!-- Dashboard + Pause Controls -->
+    <div class="grid-wide">
       <section class="card">
-        <h2>Monitoring</h2>
-        <div class="form-grid">
-          <label>Monitor Symbol
-            <select id="monitorSymbol">
-              <option value="AAPL">AAPL</option>
-              <option value="TSLA">TSLA</option>
-              <option value="NVDA">NVDA</option>
-              <option value="MSFT">MSFT</option>
-              <option value="0700HK">0700HK</option>
-              <option value="9988HK">9988HK</option>
-              <option value="0005HK">0005HK</option>
-              <option value="MOCK">MOCK</option>
-            </select>
-          </label>
+        <div class="card-header">
+          <h2 style="margin:0">Live Dashboard</h2>
+          <select id="monitorSymbol" style="width:auto;margin-top:0">
+            <option value="AAPL">AAPL</option>
+            <option value="TSLA">TSLA</option>
+            <option value="NVDA">NVDA</option>
+            <option value="MSFT">MSFT</option>
+            <option value="0700HK">0700HK</option>
+            <option value="9988HK">9988HK</option>
+            <option value="0005HK">0005HK</option>
+            <option value="MOCK" selected>MOCK</option>
+          </select>
         </div>
-        <button id="refreshDashboardButton">Refresh Dashboard</button>
-        <pre id="dashboardOutput">Dashboard not loaded.</pre>
-        <p id="liveAdminChartStatus" class="muted">Load contracts to start intraday monitoring.</p>
-        <canvas id="adminLivePriceChart" width="520" height="220"></canvas>
+        <button id="refreshDashboardButton">🔄 Refresh Dashboard</button>
+        <pre id="dashboardOutput" style="margin-top:12px">Dashboard not loaded.</pre>
+        <div class="chart-section">
+          <h3>Intraday Candles</h3>
+          <p id="liveAdminChartStatus" class="muted">Load contracts to start intraday monitoring.</p>
+          <canvas id="adminLivePriceChart" width="520" height="220"></canvas>
+        </div>
       </section>
 
       <section class="card">
-        <h2>Pause Controls</h2>
+        <h2>⏸️ Pause Controls</h2>
         <div class="form-grid">
-          <label>Underwriting Pause Reason <input id="pauseReasonInput" value="ADMIN_PAUSE" /></label>
+          <label>Pause Reason <input id="pauseReasonInput" value="ADMIN_PAUSE" /></label>
           <label>Calendar Date Key <input id="closureDateInput" type="number" value="20260101" /></label>
           <label>Calendar
             <select id="calendarTypeInput">
@@ -81,7 +92,7 @@
               <option value="2">Hong Kong Equity</option>
             </select>
           </label>
-          <label>Closed
+          <label>Closure State
             <select id="closureStateInput">
               <option value="true">Closed</option>
               <option value="false">Open</option>
@@ -89,33 +100,34 @@
           </label>
         </div>
         <div class="actions">
-          <button id="pauseUnderwritingButton">Pause Underwriting</button>
-          <button id="unpauseUnderwritingButton">Unpause Underwriting</button>
-          <button id="pauseQuotingButton">Pause Quoting</button>
-          <button id="unpauseQuotingButton">Unpause Quoting</button>
-          <button id="setCalendarClosureButton">Set Calendar Closure</button>
+          <button id="pauseUnderwritingButton" class="btn-danger">⛔ Pause Underwriting</button>
+          <button id="unpauseUnderwritingButton" class="btn-success">▶️ Unpause Underwriting</button>
+          <button id="pauseQuotingButton" class="btn-secondary">🔇 Pause Quoting</button>
+          <button id="unpauseQuotingButton" class="btn-secondary">🔊 Unpause Quoting</button>
+          <button id="setCalendarClosureButton" class="btn-secondary">📅 Set Calendar Closure</button>
         </div>
       </section>
-    </section>
+    </div>
 
-    <section class="grid">
+    <!-- Risk Limits + Symbol Limits -->
+    <div class="grid">
       <section class="card">
-        <h2>Risk Limits</h2>
+        <h2>🛡️ Risk Limits</h2>
         <div class="form-grid">
           <label>Max Utilization Bps <input id="maxUtilizationInput" type="number" value="9000" /></label>
           <label>Emergency Pause Bps <input id="emergencyUtilizationInput" type="number" value="8500" /></label>
-          <label>Minimum Buffer (USDC) <input id="minBufferInput" type="number" value="0" /></label>
-          <label>Max Downside Exposure (USDC) <input id="maxDownsideInput" type="number" value="1000000" /></label>
-          <label>Max Upside Exposure (USDC) <input id="maxUpsideInput" type="number" value="1000000" /></label>
-          <label>Max Short Term Exposure (USDC) <input id="maxShortInput" type="number" value="1000000" /></label>
-          <label>Max Medium Term Exposure (USDC) <input id="maxMediumInput" type="number" value="1000000" /></label>
-          <label>Max Long Term Exposure (USDC) <input id="maxLongInput" type="number" value="1000000" /></label>
+          <label>Min Buffer (USDC) <input id="minBufferInput" type="number" value="0" /></label>
+          <label>Max Downside (USDC) <input id="maxDownsideInput" type="number" value="1000000" /></label>
+          <label>Max Upside (USDC) <input id="maxUpsideInput" type="number" value="1000000" /></label>
+          <label>Max Short Term (USDC) <input id="maxShortInput" type="number" value="1000000" /></label>
+          <label>Max Medium Term (USDC) <input id="maxMediumInput" type="number" value="1000000" /></label>
+          <label>Max Long Term (USDC) <input id="maxLongInput" type="number" value="1000000" /></label>
         </div>
         <button id="configureRiskButton">Update Risk Limits</button>
       </section>
 
       <section class="card">
-        <h2>Symbol Exposure Limit</h2>
+        <h2>📊 Symbol Exposure Limit</h2>
         <div class="form-grid">
           <label>Symbol
             <select id="limitSymbolInput">
@@ -133,23 +145,24 @@
         </div>
         <button id="setSymbolLimitButton">Set Symbol Limit</button>
       </section>
-    </section>
+    </div>
 
+    <!-- Market Governance -->
     <section class="card">
-      <h2>Market Governance</h2>
+      <h2>🏛️ Market Governance</h2>
       <div class="form-grid">
         <label>Symbol
           <select id="marketSymbolInput">
             <option value="AAPL">AAPL</option>
             <option value="TSLA">TSLA</option>
             <option value="NVDA">NVDA</option>
-              <option value="MSFT">MSFT</option>
-              <option value="0700HK">0700HK</option>
-              <option value="9988HK">9988HK</option>
-              <option value="0005HK">0005HK</option>
-              <option value="MOCK">MOCK</option>
-            </select>
-          </label>
+            <option value="MSFT">MSFT</option>
+            <option value="0700HK">0700HK</option>
+            <option value="9988HK">9988HK</option>
+            <option value="0005HK">0005HK</option>
+            <option value="MOCK">MOCK</option>
+          </select>
+        </label>
         <label>Base Premium Bps <input id="basePremiumInput" type="number" value="150" /></label>
         <label>Max Notional (USDC) <input id="maxNotionalInput" type="number" value="50000" /></label>
         <label>Min Trigger Bps <input id="minTriggerInput" type="number" value="500" /></label>
@@ -157,7 +170,7 @@
         <label>Open Minutes Local <input id="openMinutesInput" type="number" value="570" /></label>
         <label>Close Minutes Local <input id="closeMinutesInput" type="number" value="960" /></label>
         <label>Close Buffer Minutes <input id="closeBufferInput" type="number" value="15" /></label>
-        <label>Overnight Gap Surcharge Bps <input id="overnightGapInput" type="number" value="120" /></label>
+        <label>Overnight Gap Bps <input id="overnightGapInput" type="number" value="120" /></label>
         <label>Calendar
           <select id="marketCalendarInput">
             <option value="1">US Equity</option>
@@ -193,35 +206,49 @@
       <button id="configureMarketButton">Configure Market</button>
     </section>
 
+    <!-- Oracle Wiring -->
     <section class="card">
-      <h2>Oracle Wiring</h2>
+      <h2>🔭 Oracle Wiring</h2>
       <div class="form-grid">
         <label>Risk Parameter Provider <input id="riskProviderInput" placeholder="0x..." /></label>
         <label>Oracle Adapter <input id="oracleAdapterInput" placeholder="0x..." /></label>
       </div>
       <div class="actions">
-        <button id="setRiskProviderButton">Set Risk Provider</button>
-        <button id="setOracleAdapterButton">Set Oracle Adapter</button>
+        <button id="setRiskProviderButton" class="btn-secondary">Set Risk Provider</button>
+        <button id="setOracleAdapterButton" class="btn-secondary">Set Oracle Adapter</button>
       </div>
     </section>
 
+    <!-- MOCK Presentation Controls -->
     <section class="card">
-      <h2>MOCK Presentation Controls</h2>
+      <div class="card-header">
+        <h2 style="margin:0">🎬 MOCK Presentation Controls</h2>
+        <span class="pill" id="mockFeedPill">Feed: not loaded</span>
+      </div>
+      <p class="muted" style="margin-bottom:12px;font-size:13px">
+        Simulate a 30-day market scenario on-chain by advancing the MOCK price feed candle-by-candle.
+        Requires admin wallet (Hardhat account #0) and loaded contracts.
+      </p>
       <div class="form-grid">
-        <label>Playback Speed (ms) <input id="mockPlaybackMsInput" type="number" value="300" min="50" step="50" /></label>
+        <label>Playback Speed (ms/candle) <input id="mockPlaybackMsInput" type="number" value="300" min="50" step="50" /></label>
       </div>
       <div class="actions">
-        <button id="loadMockScenarioButton">Load MOCK Scenario</button>
-        <button id="prevMockCandleButton">Previous Candle</button>
-        <button id="nextMockCandleButton">Next Candle</button>
-        <button id="autoplayMockButton">Autoplay MOCK Month</button>
+        <button id="loadMockScenarioButton" class="btn-secondary">📂 Load MOCK Scenario</button>
+        <button id="prevMockCandleButton" class="btn-secondary">◀️ Previous Candle</button>
+        <button id="nextMockCandleButton">▶️ Next Candle</button>
+        <button id="autoplayMockButton" class="btn-success">⏩ Autoplay MOCK Month</button>
       </div>
-      <pre id="mockScenarioOutput">MOCK scenario controls idle.</pre>
+      <pre id="mockScenarioOutput" style="margin-top:14px">MOCK scenario controls idle. Click "Load MOCK Scenario" first.</pre>
+      <div class="chart-section">
+        <h3>MOCK Price Path</h3>
+        <canvas id="mockPathChart" width="700" height="200"></canvas>
+      </div>
     </section>
 
+    <!-- Activity Log -->
     <section class="card">
-      <h2>Activity</h2>
-      <pre id="logOutput">Ready.</pre>
+      <h2>📋 Activity Log</h2>
+      <pre id="logOutput" style="max-height:200px">Ready.</pre>
     </section>
   </main>
 

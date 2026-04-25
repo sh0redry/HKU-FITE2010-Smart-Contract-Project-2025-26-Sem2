@@ -3,5 +3,7 @@
   "alphaVantageApiKey": "your_alpha_vantage_key_here",
   "alphaVantageBaseUrl": "https://www.alphavantage.co/query",
   "yfinanceChartBaseUrl": "https://query1.finance.yahoo.com/v8/finance/chart",
+  "marketDataProxyPath": "/api/market-candles",
+  "syncMarketPriceProxyPath": "/api/sync-market-price",
   "refreshIntervalMs": 60000
 }

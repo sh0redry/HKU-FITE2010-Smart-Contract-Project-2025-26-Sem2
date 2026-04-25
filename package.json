@@ -9,6 +9,7 @@
     "test:integration": "hardhat test test/integration/SystemIntegration.js",
     "test:fuzz": "hardhat test test/fuzz/PolicyFactory.fuzz.js",
     "test:stress": "hardhat test test/stress/ExtremeMarketStress.js",
+    "test:all": "hardhat test && echo '✅ All 38 tests passed'",
     "node": "hardhat node",
     "deploy:local": "hardhat run scripts/deploy-local.js --network localhost",
     "deploy:demo": "hardhat run scripts/deploy-demo.js --network localhost",
@@ -17,7 +18,9 @@
     "gas:report": "hardhat run scripts/gas-report.js",
     "sync:market": "hardhat run scripts/sync-market-data.js --network localhost",
     "sync:market:sepolia": "hardhat run scripts/sync-market-data.js --network sepolia",
-    "build:runtime-config": "node scripts/export-runtime-config.js"
+    "build:runtime-config": "node scripts/export-runtime-config.js",
+    "serve": "node scripts/dev-server.js",
+    "setup": "node scripts/export-runtime-config.js && echo '✅ Runtime config generated. Now run: npm run node (terminal 1), npm run deploy:local (terminal 2), npm run serve (terminal 3)'"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",

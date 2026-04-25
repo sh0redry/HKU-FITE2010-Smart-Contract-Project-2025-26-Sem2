@@ -36,8 +36,11 @@ function riskSnapshot(ethers, {
 }
 
 function marketSeedDataForEnv(ethers, deployer, getFeedFactory, envLabel) {
-  const hkHours = envLabel === "demo" ? false : true;
-  const usHours = envLabel === "demo" ? false : true;
+  // Local and demo are presentation environments: keep quoting available 24/7.
+  // Testnet keeps realistic market-hour enforcement.
+  const isPresentationEnv = envLabel === "demo" || envLabel === "local";
+  const hkHours = isPresentationEnv ? false : true;
+  const usHours = isPresentationEnv ? false : true;
   const sourceUs = envLabel === "testnet" ? "CHAINLINK_TN" : "CHAINLINK_FN";
   const sourceHk = envLabel === "testnet" ? "HK_TN" : "HK_FN";
 

@@ -16,6 +16,10 @@ async function loadRuntimeConfig() {
   return runtimeConfigPromise;
 }
 
+function proxyPathFor(runtimeConfig) {
+  return runtimeConfig?.marketDataProxyPath || "/api/market-candles";
+}
+
 function alphaSymbolFor(deployment, symbol) {
   return deployment?.markets?.[symbol]?.alphaVantageSymbol || symbol;
 }
@@ -24,16 +28,33 @@ function yfinanceSymbolFor(deployment, symbol) {
   return deployment?.markets?.[symbol]?.yfinanceSymbol || symbol;
 }
 
-function mockCandles() {
-  const scenario = MARKET_SCENARIOS.MOCK || [];
+function defaultYfinanceSymbol(symbol) {
+  const upper = String(symbol || "").toUpperCase();
+  if (upper === "MOCK") return "MOCK";
+  if (upper.endsWith("HK")) {
+    const raw = upper.replace("HK", "");
+    const padded = raw.padStart(4, "0");
+    return `${padded}.HK`;
+  }
+  return upper;
+}
+
+function scenarioCandlesFor(symbol) {
+  const scenario = MARKET_SCENARIOS[symbol] || [];
+  if (scenario.length === 0) return [];
   return scenario.map((point, index) => {
     const previous = scenario[Math.max(index - 1, 0)]?.price ?? point.price;
+    const drift = Math.max(point.price * 0.012, 0.05);
     const open = previous;
     const close = point.price;
-    const high = Math.max(open, close) * 1.015;
-    const low = Math.min(open, close) * 0.985;
-    return { time: point.date, open, high, low, close };
+    const high = Math.max(open, close) + drift;
+    const low = Math.max(0.01, Math.min(open, close) - drift);
+    return { time: point.date, open, high, low, close, source: "scenario-fallback" };
   });
+}
+
+function mockCandles() {
+  return scenarioCandlesFor("MOCK");
 }
 
 async function fetchAlphaVantageCandles(symbol, deployment) {
@@ -48,98 +69,63 @@ async function fetchAlphaVantageCandles(symbol, deployment) {
   }
 
   const query = new URLSearchParams({
-    function: "TIME_SERIES_INTRADAY",
-    interval: "5min",
-    outputsize: "compact",
+    provider: "alpha-vantage",
     symbol: alphaSymbol,
-    apikey: runtimeConfig.alphaVantageApiKey
+    range: "1week"
   });
 
-  const response = await fetch(`${runtimeConfig.alphaVantageBaseUrl}?${query.toString()}`);
+  const response = await fetch(`${proxyPathFor(runtimeConfig)}?${query.toString()}`);
   if (!response.ok) {
     throw new Error(`Market data request failed with HTTP ${response.status}.`);
   }
 
   const data = await response.json();
-  if (data.Note) {
-    throw new Error(`Alpha Vantage rate limit: ${data.Note}`);
-  }
-  if (data["Error Message"]) {
-    throw new Error(`Alpha Vantage error for ${alphaSymbol}.`);
+  if (data.error) {
+    throw new Error(data.error);
   }
 
-  const series = data["Time Series (5min)"];
-  if (!series) {
-    throw new Error(`No intraday candles available for ${alphaSymbol}.`);
-  }
-
-  return Object.entries(series)
-    .map(([time, candle]) => ({
-      time,
-      open: Number(candle["1. open"]),
-      high: Number(candle["2. high"]),
-      low: Number(candle["3. low"]),
-      close: Number(candle["4. close"])
-    }))
-    .sort((left, right) => left.time.localeCompare(right.time))
-    .slice(-48);
+  return Array.isArray(data.candles) ? data.candles : [];
 }
 
 async function fetchYfinanceCandles(symbol, deployment) {
   const runtimeConfig = await loadRuntimeConfig();
-  const yfinanceSymbol = yfinanceSymbolFor(deployment, symbol);
-  if (yfinanceSymbol === "MOCK") {
+  const mappedFromDeployment = yfinanceSymbolFor(deployment, symbol);
+  const normalizedFallback = defaultYfinanceSymbol(symbol);
+  const candidates = [...new Set([mappedFromDeployment, normalizedFallback].filter(Boolean))];
+  if (candidates.includes("MOCK")) {
     return mockCandles();
   }
 
-  const query = new URLSearchParams({
-    interval: "5m",
-    range: "1d",
-    includePrePost: "false",
-    events: "div,splits"
-  });
-
-  const response = await fetch(`${runtimeConfig?.yfinanceChartBaseUrl || "https://query1.finance.yahoo.com/v8/finance/chart"}/${encodeURIComponent(yfinanceSymbol)}?${query.toString()}`);
-  if (!response.ok) {
-    throw new Error(`Yahoo Finance request failed with HTTP ${response.status}.`);
-  }
-
-  const data = await response.json();
-  const result = data?.chart?.result?.[0];
-  const error = data?.chart?.error;
-  if (error) {
-    throw new Error(`Yahoo Finance error: ${error.description || error.code}`);
-  }
-  if (!result) {
-    throw new Error(`No intraday candles available for ${yfinanceSymbol}.`);
-  }
-
-  const timestamps = result.timestamp || [];
-  const quote = result.indicators?.quote?.[0];
-  if (!quote || timestamps.length === 0) {
-    throw new Error(`No intraday candles available for ${yfinanceSymbol}.`);
-  }
-
-  return timestamps
-    .map((timestamp, index) => {
-      const open = Number(quote.open?.[index]);
-      const high = Number(quote.high?.[index]);
-      const low = Number(quote.low?.[index]);
-      const close = Number(quote.close?.[index]);
-      if (![open, high, low, close].every((value) => Number.isFinite(value) && value > 0)) {
-        return null;
+  let lastError = null;
+  for (const yfinanceSymbol of candidates) {
+    try {
+      const query = new URLSearchParams({
+        provider: "yfinance",
+        symbol: yfinanceSymbol,
+        range: "1week"
+      });
+      const response = await fetch(`${proxyPathFor(runtimeConfig)}?${query.toString()}`);
+      if (!response.ok) {
+        throw new Error(`Yahoo Finance request failed with HTTP ${response.status}.`);
       }
 
-      return {
-        time: new Date(timestamp * 1000).toLocaleString(),
-        open,
-        high,
-        low,
-        close
-      };
-    })
-    .filter(Boolean)
-    .slice(-48);
+      const data = await response.json();
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      const candles = Array.isArray(data.candles) ? data.candles : [];
+
+      if (candles.length > 0) {
+        return candles;
+      }
+      throw new Error(`No valid intraday candles parsed for ${yfinanceSymbol}.`);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error(`No intraday candles available for ${symbol}.`);
 }
 
 export async function fetchMarketCandles(symbol, deployment) {
@@ -150,11 +136,25 @@ export async function fetchMarketCandles(symbol, deployment) {
   const runtimeConfig = await loadRuntimeConfig();
   const provider = (runtimeConfig?.marketDataProvider || "yfinance").toLowerCase();
 
-  if (provider === "alpha-vantage") {
-    return fetchAlphaVantageCandles(symbol, deployment);
+  try {
+    if (provider === "alpha-vantage") {
+      return await fetchAlphaVantageCandles(symbol, deployment);
+    }
+    return await fetchYfinanceCandles(symbol, deployment);
+  } catch (primaryError) {
+    try {
+      if (provider === "alpha-vantage") {
+        return await fetchYfinanceCandles(symbol, deployment);
+      }
+      return await fetchAlphaVantageCandles(symbol, deployment);
+    } catch {
+      const scenarioFallback = scenarioCandlesFor(symbol);
+      if (scenarioFallback.length > 0) {
+        return scenarioFallback;
+      }
+      throw primaryError;
+    }
   }
-
-  return fetchYfinanceCandles(symbol, deployment);
 }
 
 export function drawCandlestickChart(canvas, candles, title) {
@@ -167,49 +167,74 @@ export function drawCandlestickChart(canvas, candles, title) {
   const height = canvas.height;
   ctx.clearRect(0, 0, width, height);
 
-  ctx.fillStyle = "#2d2115";
-  ctx.fillRect(0, 0, width, height);
-
   if (!candles || candles.length === 0) {
-    ctx.fillStyle = "#fdf2e4";
-    ctx.font = "14px sans-serif";
-    ctx.fillText("No intraday candles loaded.", 16, 28);
+    ctx.fillStyle = "rgba(106,140,176,0.55)";
+    ctx.font = "13px Inter, sans-serif";
+    ctx.fillText(title || "No intraday candles loaded.", 16, 28);
     return;
   }
 
   const maxPrice = Math.max(...candles.map((candle) => candle.high));
   const minPrice = Math.min(...candles.map((candle) => candle.low));
   const priceRange = Math.max(maxPrice - minPrice, 0.0001);
-  const candleWidth = Math.max(((width - 60) / candles.length) * 0.55, 3);
-  const xStep = (width - 60) / candles.length;
+  const padL = 52, padR = 20, padT = 22, padB = 20;
+  const drawW = width - padL - padR;
+  const drawH = height - padT - padB;
+  const candleWidth = Math.max((drawW / candles.length) * 0.55, 2);
+  const xStep = drawW / candles.length;
 
-  const toY = (price) => 24 + ((maxPrice - price) / priceRange) * (height - 52);
+  const toY = (price) => padT + ((maxPrice - price) / priceRange) * drawH;
 
-  ctx.fillStyle = "#fdf2e4";
-  ctx.font = "13px sans-serif";
-  ctx.fillText(title, 16, 18);
-  ctx.fillText(`High ${maxPrice.toFixed(2)}`, width - 130, 18);
-  ctx.fillText(`Low ${minPrice.toFixed(2)}`, width - 130, height - 12);
+  // Grid
+  ctx.setLineDash([4, 4]);
+  ctx.lineWidth = 1;
+  for (let g = 0; g <= 3; g++) {
+    const y = padT + (g / 3) * drawH;
+    const price = maxPrice - (g / 3) * (maxPrice - minPrice);
+    ctx.strokeStyle = "rgba(55,130,255,0.1)";
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(width - padR, y); ctx.stroke();
+    ctx.fillStyle = "rgba(106,140,176,0.7)";
+    ctx.font = "10px JetBrains Mono, monospace";
+    ctx.textAlign = "right";
+    ctx.fillText(`$${price.toFixed(2)}`, padL - 4, y + 3);
+  }
+  ctx.setLineDash([]);
+  ctx.textAlign = "start";
+
+  // Title / stats
+  ctx.fillStyle = "rgba(184,212,242,0.8)";
+  ctx.font = "12px Inter, sans-serif";
+  ctx.fillText(title, padL, 14);
+  ctx.textAlign = "right";
+  ctx.fillStyle = "rgba(0,196,140,0.85)";
+  ctx.fillText(`H $${maxPrice.toFixed(2)}`, width - padR, 14);
+  ctx.fillStyle = "rgba(247,75,103,0.85)";
+  ctx.fillText(`L $${minPrice.toFixed(2)}`, width - padR, height - 4);
+  ctx.textAlign = "start";
 
   candles.forEach((candle, index) => {
-    const x = 30 + index * xStep + xStep / 2;
-    const openY = toY(candle.open);
+    const x = padL + index * xStep + xStep / 2;
+    const openY  = toY(candle.open);
     const closeY = toY(candle.close);
-    const highY = toY(candle.high);
-    const lowY = toY(candle.low);
-    const isUp = candle.close >= candle.open;
+    const highY  = toY(candle.high);
+    const lowY   = toY(candle.low);
+    const isUp   = candle.close >= candle.open;
 
-    ctx.strokeStyle = isUp ? "#6ec28b" : "#de7c2d";
-    ctx.lineWidth = 1.4;
+    // Wick
+    ctx.strokeStyle = isUp ? "rgba(0,196,140,0.8)" : "rgba(247,75,103,0.8)";
+    ctx.lineWidth = 1.2;
     ctx.beginPath();
     ctx.moveTo(x, highY);
     ctx.lineTo(x, lowY);
     ctx.stroke();
 
-    ctx.fillStyle = isUp ? "#6ec28b" : "#de7c2d";
+    // Body
+    ctx.fillStyle = isUp ? "rgba(0,196,140,0.85)" : "rgba(247,75,103,0.85)";
     const bodyTop = Math.min(openY, closeY);
     const bodyHeight = Math.max(Math.abs(closeY - openY), 2);
-    ctx.fillRect(x - candleWidth / 2, bodyTop, candleWidth, bodyHeight);
+    ctx.beginPath();
+    ctx.roundRect(x - candleWidth / 2, bodyTop, candleWidth, bodyHeight, 1);
+    ctx.fill();
   });
 }
 
@@ -232,7 +257,14 @@ export function summarizeCandles(candles) {
     `last: ${last.close.toFixed(2)}`,
     `high: ${high.toFixed(2)}`,
     `low: ${low.toFixed(2)}`,
-    `move: ${movePct.toFixed(2)}%`
+    `move: ${movePct.toFixed(2)}%`,
+    candles.some((candle) => candle.source === "scenario-fallback")
+      ? "source: local scenario fallback"
+      : candles.some((candle) => candle.source === "proxy-yfinance")
+        ? "source: yfinance via local proxy"
+        : candles.some((candle) => candle.source === "proxy-alpha-vantage")
+          ? "source: alpha vantage via local proxy"
+          : "source: live"
   ].join(" | ");
 }
 

@@ -3,140 +3,200 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Stock Hedge Insurance Desk</title>
+  <title>Stock Hedge Insurance — Buyer</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
   <main class="shell">
     <nav class="topnav">
-      <a class="active" href="./index.html">Manual Test</a>
-      <a href="./simulation.html">Scenario Simulator</a>
-      <a href="./admin.html">Admin Console</a>
+      <a class="active" href="./index.html">🛒 Buyer</a>
+      <a href="./simulation.html">📊 Simulator</a>
+      <a href="./admin.html">⚙️ Admin</a>
     </nav>
+
+    <!-- Hero -->
     <section class="hero">
-      <p class="eyebrow">Multi-Market Insurance MVP</p>
-      <h1>Manual chain-connected page for U.S. and Hong Kong stock insurance</h1>
+      <p class="eyebrow">📈 Stock Hedge Insurance — Buyer Portal</p>
+      <h1>On-chain stock price insurance</h1>
       <p class="lede">
-        Connect a wallet, point to your deployed contracts, quote trigger-based insurance, buy coverage, cancel after
-        the lock delay, settle after expiry, and inspect LP accounting across round-the-clock market coverage.
+        Connect your wallet, load the deployed contracts, pick a preset, get a premium quote,
+        and purchase coverage. Policies settle automatically after expiry.
       </p>
+
+      <!-- Presets -->
       <div class="demo-strip">
         <div>
-          <strong>Defense Path</strong>
-          <p>1. Connect buyer wallet. 2. Load contracts. 3. Apply a preset. 4. Quote and buy. 5. Refresh policies and vault.</p>
+          <strong>Demo Quick-Start</strong>
+          <p>1. Connect wallet → 2. Load Contracts → 3. Pick a preset → 4. Get Quote → 5. Buy Policy</p>
         </div>
         <div>
           <strong>Presentation Presets</strong>
           <div class="inline-actions">
-            <button id="presetUsButton" type="button">U.S. Downside</button>
-            <button id="presetHkButton" type="button">Hong Kong Session</button>
-            <button id="presetMockButton" type="button">MOCK 30-Day Demo</button>
+            <button id="presetUsButton" type="button" class="btn-secondary">🇺🇸 U.S. Downside</button>
+            <button id="presetHkButton" type="button" class="btn-secondary">🇭🇰 HK Session</button>
+            <button id="presetMockButton" type="button">🎬 MOCK 30-Day Demo</button>
           </div>
         </div>
       </div>
+
       <div class="hero-meta">
         <span id="networkBadge" class="pill">No network</span>
         <span id="deploymentStatus" class="muted">Connect a wallet to detect the current network.</span>
       </div>
+
       <button id="connectButton">Connect Wallet</button>
-      <p id="walletStatus" class="muted">Wallet not connected.</p>
+      <p id="walletStatus" class="muted" style="margin-top:10px">Wallet not connected.</p>
       <div id="txFeedback"></div>
     </section>
 
+    <!-- Contract Addresses -->
     <section class="card">
-      <h2>Contract Addresses</h2>
-      <label>Policy Factory <input id="policyFactoryAddress" placeholder="0x..." /></label>
-      <label>Insurance Vault <input id="vaultAddress" placeholder="0x..." /></label>
-      <label>Pricing Oracle <input id="oracleAddress" placeholder="0x..." /></label>
+      <div class="card-header">
+        <h2 style="margin:0">Contract Addresses</h2>
+        <span class="pill" id="contractStatus">Not loaded</span>
+      </div>
+      <div class="form-grid">
+        <label>Policy Factory <input id="policyFactoryAddress" placeholder="0x..." /></label>
+        <label>Insurance Vault <input id="vaultAddress" placeholder="0x..." /></label>
+        <label>Pricing Oracle <input id="oracleAddress" placeholder="0x..." /></label>
+      </div>
       <button id="saveAddressesButton">Load Contracts</button>
-      <p class="muted">The vault uses MockUSDC settlement. If `frontend/deployments/localhost.json` exists, the page will try to preload local addresses.</p>
+      <p class="muted" style="margin-top:10px;font-size:12px">
+        Uses MockUSDC settlement. If <code>frontend/deployments/localhost.json</code> exists, addresses auto-load.
+      </p>
     </section>
 
-    <section class="grid">
+    <!-- Main grid: Quote + Chart -->
+    <div class="grid-wide">
+      <!-- Left: Quote & Buy -->
       <section class="card">
-        <h2>Quote & Buy Policy</h2>
-        <label>Ticker
-          <select id="symbolInput">
-            <option value="AAPL">AAPL</option>
-            <option value="TSLA">TSLA</option>
-            <option value="NVDA">NVDA</option>
-            <option value="MSFT">MSFT</option>
-            <option value="0700HK">0700HK</option>
-            <option value="9988HK">9988HK</option>
-            <option value="0005HK">0005HK</option>
-            <option value="MOCK">MOCK</option>
-          </select>
-        </label>
-        <label>Notional (USDC) <input id="notionalInput" type="number" min="0" step="0.01" value="1000" /></label>
-        <label>Duration
-          <select id="durationInput">
-            <option value="1">1 hour</option>
-            <option value="6">6 hours</option>
-            <option value="12">12 hours</option>
-            <option value="24" selected>1 day</option>
-            <option value="72">3 days</option>
-            <option value="168">7 days</option>
-            <option value="336">14 days</option>
-            <option value="720">30 days</option>
-          </select>
-        </label>
-        <label>Direction
-          <select id="directionInput">
-            <option value="down">Downside Protection</option>
-            <option value="up">Upside Protection</option>
-          </select>
-        </label>
-        <label>Trigger Percent
-          <select id="triggerInput">
-            <option value="500">5%</option>
-            <option value="1000" selected>10%</option>
-            <option value="1500">15%</option>
-            <option value="2000">20%</option>
-          </select>
-        </label>
-        <label>Deductible (USDC) <input id="deductibleInput" type="number" min="0" step="0.01" value="0" /></label>
-        <label>Payout Cap (USDC) <input id="payoutCapInput" type="number" min="0" step="0.01" value="500" /></label>
-        <button id="quoteButton">Get Quote</button>
-        <button id="buyButton">Buy Policy</button>
-        <pre id="quoteOutput">No quote loaded.</pre>
+        <h2>Quote &amp; Buy Policy</h2>
+        <div class="form-grid">
+          <label>Ticker
+            <select id="symbolInput">
+              <option value="AAPL">AAPL — Apple</option>
+              <option value="TSLA">TSLA — Tesla</option>
+              <option value="NVDA">NVDA — NVIDIA</option>
+              <option value="MSFT">MSFT — Microsoft</option>
+              <option value="0700HK">0700HK — Tencent</option>
+              <option value="9988HK">9988HK — Alibaba</option>
+              <option value="0005HK">0005HK — HSBC</option>
+              <option value="MOCK">MOCK — Demo Market</option>
+            </select>
+          </label>
+          <label>Notional (USDC)
+            <input id="notionalInput" type="number" min="0" step="0.01" value="1000" />
+          </label>
+          <label>Duration
+            <select id="durationInput">
+              <option value="1">1 hour</option>
+              <option value="6">6 hours</option>
+              <option value="12">12 hours</option>
+              <option value="24" selected>1 day</option>
+              <option value="72">3 days</option>
+              <option value="168">7 days</option>
+              <option value="336">14 days</option>
+              <option value="720">30 days</option>
+            </select>
+          </label>
+          <label>Direction
+            <select id="directionInput">
+              <option value="down">⬇️ Downside Protection</option>
+              <option value="up">⬆️ Upside Protection</option>
+            </select>
+          </label>
+          <label>Trigger Threshold
+            <select id="triggerInput">
+              <option value="500">5% move</option>
+              <option value="1000" selected>10% move</option>
+              <option value="1500">15% move</option>
+              <option value="2000">20% move</option>
+            </select>
+          </label>
+          <label>Deductible (USDC)
+            <input id="deductibleInput" type="number" min="0" step="0.01" value="0" />
+          </label>
+          <label>Payout Cap (USDC)
+            <input id="payoutCapInput" type="number" min="0" step="0.01" value="500" />
+          </label>
+        </div>
+        <button id="quoteButton">📋 Get Quote</button>
+        <button id="syncMarketPriceButton" class="btn-secondary" style="margin-top:8px">🔄 Sync Latest Market Price</button>
+        <button id="buyButton" class="btn-success" style="margin-top:8px">✅ Buy Policy</button>
+        <pre id="quoteOutput" style="margin-top:14px;min-height:60px">No quote loaded. Click "Get Quote" after connecting.</pre>
       </section>
 
+      <!-- Right: Price & Risk charts -->
       <section class="card">
-        <h2>Price & Risk Snapshot</h2>
+        <h2>Price &amp; Risk Snapshot</h2>
         <div id="quoteKpis" class="pill-list"></div>
-        <canvas id="priceRiskChart" width="520" height="210"></canvas>
-        <canvas id="quoteBreakdownChart" width="520" height="210"></canvas>
-        <h3>Live Intraday Candles</h3>
-        <p id="liveChartStatus" class="muted">Select a symbol and load live candles.</p>
-        <canvas id="livePriceChart" width="520" height="220"></canvas>
+        <div class="chart-section">
+          <h3>Strike vs Spot</h3>
+          <canvas id="priceRiskChart" width="480" height="160"></canvas>
+        </div>
+        <div class="chart-section">
+          <h3>Premium Breakdown (bps)</h3>
+          <canvas id="quoteBreakdownChart" width="480" height="200"></canvas>
+          <div id="quoteBreakdownLegend" class="chart-legend"></div>
+        </div>
+        <div class="chart-section">
+          <h3>Live 1-Week Candles</h3>
+          <p id="liveChartStatus" class="muted">Select a symbol and load live candles.</p>
+          <canvas id="livePriceChart" width="480" height="200"></canvas>
+        </div>
       </section>
+    </div>
 
+    <!-- Policy Actions -->
+    <div class="grid">
       <section class="card">
         <h2>Policy Actions</h2>
-        <label>Policy ID <input id="settlePolicyIdInput" type="number" min="1" step="1" /></label>
-        <button id="settleButton">Settle</button>
-        <label>Cancel Policy ID <input id="cancelPolicyIdInput" type="number" min="1" step="1" /></label>
-        <button id="cancelButton">Cancel</button>
-        <button id="loadPoliciesButton">Load My Policies</button>
-        <pre id="policiesOutput">No policies loaded.</pre>
+        <label>Settle Policy ID
+          <input id="settlePolicyIdInput" type="number" min="1" step="1" placeholder="Enter policy ID" />
+        </label>
+        <button id="settleButton" class="btn-success">⚡ Settle Policy</button>
+        <label style="margin-top:14px">Cancel Policy ID
+          <input id="cancelPolicyIdInput" type="number" min="1" step="1" placeholder="Enter policy ID" />
+        </label>
+        <button id="cancelButton" class="btn-danger">✕ Cancel Policy</button>
+        <button id="loadPoliciesButton" style="margin-top:18px">📂 Load My Policies</button>
+        <pre id="policiesStatusOutput" style="min-height:40px;margin-top:12px">Click "Load My Policies" to view your coverage.</pre>
       </section>
 
       <section class="card">
         <h2>LP Vault</h2>
-        <label>Deposit (USDC) <input id="depositInput" type="number" min="0" step="0.01" value="1000" /></label>
-        <button id="depositButton">Deposit Liquidity</button>
-        <label>Withdraw Shares <input id="withdrawInput" type="number" min="0" step="0.01" value="1000" /></label>
-        <button id="withdrawButton">Withdraw</button>
-        <button id="vaultStateButton">Refresh Vault</button>
+        <label>Deposit Amount (USDC)
+          <input id="depositInput" type="number" min="0" step="0.01" value="1000" />
+        </label>
+        <button id="depositButton" class="btn-success">➕ Deposit Liquidity</button>
+        <label style="margin-top:14px">Withdraw Shares
+          <input id="withdrawInput" type="number" min="0" step="0.01" value="1000" />
+        </label>
+        <button id="withdrawButton" class="btn-secondary">➖ Withdraw</button>
+        <button id="vaultStateButton" style="margin-top:18px">🔄 Refresh Vault</button>
         <div id="lpSummary" class="pill-list"></div>
-        <canvas id="lpYieldChart" width="520" height="180"></canvas>
-        <pre id="vaultOutput">Vault state unavailable.</pre>
+        <div class="chart-section">
+          <canvas id="lpYieldChart" width="480" height="160"></canvas>
+        </div>
+        <pre id="vaultOutput" style="min-height:40px;margin-top:12px">Vault state unavailable.</pre>
       </section>
-    </section>
+    </div>
 
+    <!-- Policy Portfolio Table -->
     <section class="card">
-      <h2>Policy Portfolio</h2>
-      <div id="policySummary" class="pill-list"></div>
+      <div class="card-header">
+        <h2 style="margin:0">Policy Portfolio</h2>
+        <div id="policySummary" class="pill-list" style="margin:0"></div>
+      </div>
+
+      <!-- Utilization bar (populated by JS) -->
+      <div id="vaultUtilSection" style="display:none;margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:4px">
+          <span>Vault Utilization</span><span id="utilPct">-</span>
+        </div>
+        <div class="util-bar-wrap"><div class="util-bar-fill" id="utilBar" style="width:0%"></div></div>
+      </div>
+
       <div class="table-shell">
         <table class="data-table">
           <thead>
@@ -145,6 +205,7 @@
               <th>Symbol</th>
               <th>Side</th>
               <th>Status</th>
+              <th>Trigger Result</th>
               <th>Expiry</th>
               <th>Notional</th>
               <th>Premium</th>
@@ -152,16 +213,21 @@
             </tr>
           </thead>
           <tbody id="policiesTableBody">
-            <tr><td colspan="8" class="table-empty">No policies loaded yet.</td></tr>
+            <tr><td colspan="9" class="table-empty">Load policies to see your coverage here.</td></tr>
           </tbody>
         </table>
       </div>
-      <pre id="policiesOutput">No policies loaded.</pre>
+      <!-- JSON dump (unique ID, separate from table) -->
+      <details style="margin-top:12px">
+        <summary style="cursor:pointer;font-size:12px;color:var(--muted);padding:6px 0">Raw JSON output</summary>
+        <pre id="policiesOutput" style="min-height:40px">No policies loaded.</pre>
+      </details>
     </section>
 
+    <!-- Activity Log -->
     <section class="card">
-      <h2>Activity</h2>
-      <pre id="logOutput">Ready.</pre>
+      <h2>Activity Log</h2>
+      <pre id="logOutput" style="max-height:200px">Ready.</pre>
     </section>
   </main>
 

@@ -25,6 +25,106 @@ At a high level, the protocol supports this flow:
 6. If the insured move happened, the buyer receives a claim from the vault.
 7. If not, the reserved liquidity is released and the premium remains as LP underwriting income.
 
+## Quick Start: Testing and Local Run
+
+Use this as the default path to verify the repo and run the static frontends against a local Hardhat node.
+
+### Prerequisites
+
+- **Node.js** 18+ and **npm**
+- **Python 3** (for `npm run serve`, a simple static server; any other HTTP static server is fine)
+- A browser with **MetaMask** (or another injected wallet) for buyer/admin flows
+- (Optional) `.env` copied from `.env.example` for live market charts and `sync:market` scripts
+
+### 1) Install
+
+```bash
+git clone <repository-url>
+cd stock-hedge-insurance
+npm install
+```
+
+### 2) Tests (recommended before demos)
+
+| Command | Purpose |
+|--------|--------|
+| `npm test` or `npm run test` | Full Hardhat test suite (default entry) |
+| `npm run test:all` | Same as full suite, prints a success line when all pass |
+| `npm run test:unit` | `InsuranceVault` + `PricingOracle` unit tests only |
+| `npm run test:integration` | `test/integration/SystemIntegration.js` |
+| `npm run test:fuzz` | Fuzz tests on `PolicyFactory` |
+| `npm run test:stress` | `ExtremeMarketStress` scenario |
+
+Compile (if you changed contracts):
+
+```bash
+npm run compile
+```
+
+### 3) Frontend runtime config (for live / intraday charts)
+
+1. Copy `.env.example` to `.env` and set at least:
+   - `MARKET_DATA_PROVIDER` — default `yfinance`; use `alpha-vantage` if you prefer Alpha Vantage.
+   - If using Alpha Vantage: `ALPHA_VANTAGE_API_KEY`
+2. Generate the browser-safe file:
+
+```bash
+npm run build:runtime-config
+# shorthand that also prints follow-up hints:
+npm run setup
+```
+
+This creates `frontend/runtime-config.json` used by the buyer and admin pages for intraday data. The `MOCK` symbol can use embedded scenario data without an API key.
+
+### 4) One-command prep script (optional)
+
+```bash
+bash start-demo.sh
+```
+
+Checks Node/npm/Python, installs dependencies if needed, compiles, runs the full test suite, runs `export-runtime-config`, and prints a short **three-terminal** recipe for the live demo (chain, deploy, static server). It does not start long-running processes in the background.
+
+### 5) Local chain + deploy + open the UI (three terminals)
+
+| Terminal | Command | When |
+|----------|---------|------|
+| **1** | `npm run node` | First; keep it running (Hardhat, chain id **31337**) |
+| **2** | `npm run deploy:local` | After node is listening; deploys and writes `frontend/deployments/localhost.json` |
+| **3** | `npm run serve` | Serves the `frontend/` directory on **port 8080** |
+
+**Browser URLs**
+
+- Buyer: `http://127.0.0.1:8080/index.html`
+- Admin: `http://127.0.0.1:8080/admin.html`
+- Scenario simulator (no chain required): `http://127.0.0.1:8080/simulation.html`
+
+**MetaMask (local network)**
+
+- Network name: e.g. `Hardhat Local`
+- RPC URL: `http://127.0.0.1:8545`
+- Chain ID: `31337`
+- Currency: `ETH` (or any symbol; gas is free on local node)
+
+Import the first Hardhat test account if you need the deployer / `MOCK` price-feed owner; addresses are in the deploy script output and `localhost.json` + `admin` role hints.
+
+**Alternative deploy flavor**
+
+- `npm run deploy:demo` — demo-style deployment to the same `localhost` network (see `scripts/deploy-demo.js` for details).
+
+### 6) Update mock feeds with live market data (optional)
+
+If your `.env` and deployed addresses are set:
+
+```bash
+npm run sync:market
+# testnet:
+npm run sync:market:sepolia
+```
+
+---
+
+For testnet deploy (`sepolia`, `base-sepolia`), RPC keys, and full env notes, use `docs/DEPLOYMENT_GUIDE.md` and `.env.example`.
+
 ## Product Scope
 
 ### Supported markets
@@ -422,83 +522,34 @@ These documents summarize:
 
 ## Local Development Workflow
 
-### 1. Install dependencies
+The full step-by-step flow (install, tests, runtime config, three-terminal local run, optional `start-demo.sh`, and MetaMask settings) is documented in **[Quick Start: Testing and Local Run](#quick-start-testing-and-local-run)**.
 
-```bash
-npm install
-```
+Additional pointers:
 
-### 1.5 Configure market-data credentials for live intraday charts
-
-1. copy `.env.example` to `.env`
-2. set `MARKET_DATA_PROVIDER=yfinance` for the default Yahoo Finance path, or switch to `alpha-vantage` if you prefer that provider
-3. if you use `alpha-vantage`, fill in `ALPHA_VANTAGE_API_KEY`
-3. export a browser-readable runtime config:
-
-```bash
-npm run build:runtime-config
-```
-
-This generates `frontend/runtime-config.json`, which is used by the buyer and admin pages to fetch intraday candles for the currently selected stock. The same provider setting is also reused by the off-chain sync script.
-
-### 2. Run tests
-
-```bash
-npm run test
-npm run test:unit
-npm run test:integration
-npm run test:fuzz
-npm run test:stress
-```
-
-### 3. Start a local chain
-
-```bash
-npm run node
-```
-
-### 4. Deploy the local stack
-
-```bash
-npm run deploy:local
-```
-
-Optional demo-flavored deployment:
-
-```bash
-npm run deploy:demo
-```
-
-### 5. Open the frontends
-
-Serve the project over HTTP and open:
-
-- `frontend/index.html`
-- `frontend/admin.html`
-- `frontend/simulation.html`
-
-The buyer and admin frontends will try to auto-load the appropriate deployment file for the connected chain.
-
-### 6. Sync live market data into the local/testnet feeds
-
-```bash
-npm run sync:market
-```
-
-This command expects `ALPHA_VANTAGE_API_KEY` to be available in your shell or `.env`.
+- **Testnet deploy**: `npm run deploy:sepolia` and `npm run deploy:base-sepolia` — see `docs/DEPLOYMENT_GUIDE.md` and `hardhat.config` networks.
+- **`sync:market`** may require the same market-data and RPC variables as in `.env.example` (e.g. Alpha Vantage for some flows).
 
 ## Useful Commands
 
 ```bash
+# build & test
 npm run compile
 npm run test
+npm run test:all
 npm run test:unit
 npm run test:integration
 npm run test:fuzz
 npm run test:stress
+
+# local run
 npm run node
 npm run deploy:local
 npm run deploy:demo
+npm run serve
+npm run setup
+bash start-demo.sh
+
+# testnet & ops
 npm run deploy:sepolia
 npm run deploy:base-sepolia
 npm run gas:report
