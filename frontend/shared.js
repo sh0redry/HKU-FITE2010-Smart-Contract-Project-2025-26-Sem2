@@ -57,12 +57,40 @@ export const policyFactoryAbi = [
   "function settlePolicy(uint256 policyId)",
   "function cancelPolicy(uint256 policyId)",
   "function getPoliciesByHolder(address holder) view returns (uint256[])",
-  "function getPolicy(uint256 policyId) view returns ((uint256 id, address holder, bytes32 symbol, bool isDownsideProtection, uint16 triggerBps, uint256 strikePrice, uint256 notional, uint256 deductible, uint256 payoutCap, uint256 premiumPaid, uint256 entryPrice, uint256 exitPrice, uint256 createdAt, uint256 expiry, uint256 settledAt, uint256 reservedLiquidity, uint256 payoutAmount, uint8 status))",
+  "function getPolicy(uint256 policyId) view returns ((uint256 id, address holder, bytes32 symbol, bool isDownsideProtection, uint16 triggerBps, uint256 strikePrice, uint256 notional, uint256 deductible, uint256 payoutCap, uint256 premiumPaid, uint256 estimatedProbabilityBps, uint256 entryPrice, uint256 exitPrice, uint256 createdAt, uint256 expiry, uint256 settledAt, uint256 reservedLiquidity, uint256 payoutAmount, uint8 status))",
   "function configureRiskLimits(uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256)",
   "function setSymbolExposureLimit(bytes32 symbol, uint256 newLimit)",
   "function setUnderwritingPaused(bool paused, bytes32 reason)",
   "function unpauseUnderwriting()"
 ];
+
+export const legacyPolicyFactoryAbi = [
+  "function getPolicy(uint256 policyId) view returns ((uint256 id, address holder, bytes32 symbol, bool isDownsideProtection, uint16 triggerBps, uint256 strikePrice, uint256 notional, uint256 deductible, uint256 payoutCap, uint256 premiumPaid, uint256 entryPrice, uint256 exitPrice, uint256 createdAt, uint256 expiry, uint256 settledAt, uint256 reservedLiquidity, uint256 payoutAmount, uint8 status))"
+];
+
+export function normalizePolicy(policy) {
+  return {
+    id: policy.id,
+    holder: policy.holder,
+    symbol: policy.symbol,
+    isDownsideProtection: policy.isDownsideProtection,
+    triggerBps: policy.triggerBps,
+    strikePrice: policy.strikePrice,
+    notional: policy.notional,
+    deductible: policy.deductible,
+    payoutCap: policy.payoutCap,
+    premiumPaid: policy.premiumPaid,
+    estimatedProbabilityBps: policy.estimatedProbabilityBps ?? 0n,
+    entryPrice: policy.entryPrice,
+    exitPrice: policy.exitPrice,
+    createdAt: policy.createdAt,
+    expiry: policy.expiry,
+    settledAt: policy.settledAt,
+    reservedLiquidity: policy.reservedLiquidity,
+    payoutAmount: policy.payoutAmount,
+    status: policy.status
+  };
+}
 
 export const vaultAbi = [
   "error InvalidAddress()",

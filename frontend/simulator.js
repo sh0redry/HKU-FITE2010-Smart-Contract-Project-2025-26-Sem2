@@ -4,6 +4,8 @@ const BPS = 10000;
 const YEAR_HOURS = 365 * 24;
 const SHORT_TERM_MAX = 7 * 24;
 const MEDIUM_TERM_MAX = 21 * 24;
+const MIN_TRIGGERED_PAYOUT_BPS = 2500;
+const PREMIUM_FLOOR_BASE_BPS = 1200;
 const policies = [];
 
 // ── DOM references ──────────────────────────────────────────
@@ -508,8 +510,15 @@ function runScenario() {
       rawPayout = (policy.notional * (exitPoint.price - quote.strikePrice)) / quote.entryPrice;
 
     let payout = 0;
-    if (rawPayout > policy.deductible)
-      payout = Math.min(rawPayout - policy.deductible, policy.payoutCap);
+    if (rawPayout > 0) {
+      const surpriseBps = Math.max(BPS - quote.estimatedProbabilityBps, 0);
+      const premiumFloorBps = BPS + PREMIUM_FLOOR_BASE_BPS + Math.floor(surpriseBps / 20);
+      const premiumFloor = (quote.premium * premiumFloorBps) / BPS;
+      const capFloor = (policy.payoutCap * MIN_TRIGGERED_PAYOUT_BPS) / BPS;
+      const minTriggeredPayout = Math.max(premiumFloor, capFloor);
+      const linearPayout = rawPayout > policy.deductible ? rawPayout - policy.deductible : 0;
+      payout = Math.min(minTriggeredPayout + linearPayout, policy.payoutCap);
+    }
 
     totalPremium += quote.premium;
     totalPayout  += payout;

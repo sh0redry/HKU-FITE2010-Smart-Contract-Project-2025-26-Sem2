@@ -1,6 +1,7 @@
 import { ethers } from "https://cdn.jsdelivr.net/npm/ethers@6.15.0/+esm";
 import {
   policyFactoryAbi,
+  legacyPolicyFactoryAbi,
   vaultAbi,
   oracleAbi,
   erc20Abi,
@@ -10,6 +11,7 @@ import {
   erc20Interface,
   decodeBytes32,
   decodeError,
+  normalizePolicy,
   detectNetwork,
   loadDeploymentByChain,
   policyStatusLabel,
@@ -208,6 +210,21 @@ async function safeGetSpotPrice(symbol) {
     return await state.contracts.oracle.getSpotPrice(ethers.encodeBytes32String(symbol));
   } catch {
     return 0n;
+  }
+}
+
+async function getPolicyCompat(policyId) {
+  try {
+    return normalizePolicy(await state.contracts.policyFactory.getPolicy(policyId));
+  } catch (error) {
+    const message = String(error?.shortMessage || error?.message || error);
+    if (!message.includes("could not decode result data")) {
+      throw error;
+    }
+
+    const address = await state.contracts.policyFactory.getAddress();
+    const legacyReader = new ethers.Contract(address, legacyPolicyFactoryAbi, state.provider);
+    return normalizePolicy(await legacyReader.getPolicy(policyId));
   }
 }
 
@@ -711,7 +728,7 @@ async function loadPolicies() {
   const counters = { Active: 0, Expired: 0, Settled: 0, Cancelled: 0 };
 
   const policies = await Promise.all(
-    policyIds.map((id) => state.contracts.policyFactory.getPolicy(id))
+    policyIds.map((id) => getPolicyCompat(id))
   );
   const symbols = [...new Set(policies.map((policy) => decodeBytes32(policy.symbol)))];
   const spotEntries = await Promise.all(

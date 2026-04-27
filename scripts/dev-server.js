@@ -90,8 +90,8 @@ async function getYfinanceCandles(symbol) {
 async function getYfinanceCandlesForRange(symbol, rangeMode = "intraday") {
   const isOneWeek = rangeMode === "1week";
   const query = new URLSearchParams({
-    interval: isOneWeek ? "30m" : "5m",
-    range: isOneWeek ? "5d" : "1d",
+    interval: isOneWeek ? "60m" : "5m",
+    range: isOneWeek ? "1mo" : "1d",
     includePrePost: "false",
     events: "div,splits"
   });
@@ -112,7 +112,7 @@ async function getYfinanceCandlesForRange(symbol, rangeMode = "intraday") {
     throw new Error(`No candles available for ${symbol}.`);
   }
 
-  const candles = timestamps
+  let candles = timestamps
     .map((timestamp, index) => {
       const open = Number(quote.open?.[index]);
       const high = Number(quote.high?.[index]);
@@ -121,8 +121,10 @@ async function getYfinanceCandlesForRange(symbol, rangeMode = "intraday") {
       if (![open, high, low, close].every((value) => Number.isFinite(value) && value > 0)) {
         return null;
       }
+      const date = new Date(timestamp * 1000);
       return {
-        time: new Date(timestamp * 1000).toLocaleString(),
+        time: date.toLocaleString(),
+        dateKey: date.toISOString().slice(0, 10),
         open,
         high,
         low,
@@ -130,8 +132,15 @@ async function getYfinanceCandlesForRange(symbol, rangeMode = "intraday") {
         source: "proxy-yfinance"
       };
     })
-    .filter(Boolean)
-    .slice(-48);
+    .filter(Boolean);
+
+  if (isOneWeek) {
+    const uniqueDates = [...new Set(candles.map((candle) => candle.dateKey))];
+    const selectedDates = new Set(uniqueDates.slice(-7));
+    candles = candles.filter((candle) => selectedDates.has(candle.dateKey));
+  } else {
+    candles = candles.slice(-48);
+  }
 
   if (candles.length === 0) {
     throw new Error(`No valid candles parsed for ${symbol}.`);

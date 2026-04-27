@@ -436,9 +436,18 @@ describe("Phase 8 Governance And Multi-Market Lifecycle", function () {
     const settledPolicy = await policyFactory.getPolicy(1);
     const rawPayout =
       (purchasedPolicy.notional * (purchasedPolicy.strikePrice - ethers.parseEther("120"))) / purchasedPolicy.entryPrice;
-    const expectedPayout = rawPayout > purchasedPolicy.deductible
+    const surpriseBps = 10000n > purchasedPolicy.estimatedProbabilityBps
+      ? 10000n - purchasedPolicy.estimatedProbabilityBps
+      : 0n;
+    const premiumFloorBps = 10000n + 1200n + (surpriseBps / 20n);
+    const premiumFloor = (purchasedPolicy.premiumPaid * premiumFloorBps) / 10000n;
+    const capFloor = (purchasedPolicy.payoutCap * 2500n) / 10000n;
+    const minTriggeredPayout = premiumFloor > capFloor ? premiumFloor : capFloor;
+    const linearPayout = rawPayout > purchasedPolicy.deductible
       ? rawPayout - purchasedPolicy.deductible
       : 0n;
+    const triggeredPayout = minTriggeredPayout + linearPayout;
+    const expectedPayout = triggeredPayout > purchasedPolicy.payoutCap ? purchasedPolicy.payoutCap : triggeredPayout;
 
     expect(settledPolicy.exitPrice).to.equal(ethers.parseEther("120"));
     expect(settledPolicy.payoutAmount).to.equal(expectedPayout);

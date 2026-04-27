@@ -1,6 +1,7 @@
 import { ethers } from "https://cdn.jsdelivr.net/npm/ethers@6.15.0/+esm";
 import {
   policyFactoryAbi,
+  legacyPolicyFactoryAbi,
   vaultAbi,
   oracleAbi,
   erc20Abi,
@@ -13,6 +14,7 @@ import {
   detectNetwork,
   loadDeploymentByChain,
   decodeError,
+  normalizePolicy,
   policyStatusLabel,
   liveTriggerPreview
 } from "./shared.js";
@@ -312,6 +314,21 @@ async function safeGetSpotPrice(symbol) {
   }
 }
 
+async function getPolicyCompat(policyId) {
+  try {
+    return normalizePolicy(await state.contracts.policyFactory.getPolicy(policyId));
+  } catch (error) {
+    const message = String(error?.shortMessage || error?.message || error);
+    if (!message.includes("could not decode result data")) {
+      throw error;
+    }
+
+    const address = await state.contracts.policyFactory.getAddress();
+    const legacyReader = new ethers.Contract(address, legacyPolicyFactoryAbi, state.provider);
+    return normalizePolicy(await legacyReader.getPolicy(policyId));
+  }
+}
+
 async function refreshMonitoredPolicies() {
   requireWallet();
   requireContracts();
@@ -333,7 +350,7 @@ async function refreshMonitoredPolicies() {
   }
 
   const policies = await Promise.all(
-    policyIds.map((id) => state.contracts.policyFactory.getPolicy(id))
+    policyIds.map((id) => getPolicyCompat(id))
   );
 
   const monitorSymbol = el.monitorSymbol.value.trim().toUpperCase();

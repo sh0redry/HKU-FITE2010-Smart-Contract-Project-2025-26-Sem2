@@ -10,6 +10,7 @@ import "../interfaces/IPricingEngine.sol";
 contract PolicyFactory is AccessControl, Pausable {
     uint256 public constant BPS = 10_000;
     uint256 public constant MIN_CANCEL_DELAY = 30 minutes;
+    uint256 public constant MIN_TRIGGERED_PAYOUT_BPS = 2_500;
     uint256 public constant SHORT_TERM_MAX = 7 days;
     uint256 public constant MEDIUM_TERM_MAX = 21 days;
 
@@ -40,6 +41,7 @@ contract PolicyFactory is AccessControl, Pausable {
         uint256 deductible;
         uint256 payoutCap;
         uint256 premiumPaid;
+        uint256 estimatedProbabilityBps;
         uint256 entryPrice;
         uint256 exitPrice;
         uint256 createdAt;
@@ -239,6 +241,7 @@ contract PolicyFactory is AccessControl, Pausable {
             deductible: deductible,
             payoutCap: payoutCap,
             premiumPaid: quote.premium,
+            estimatedProbabilityBps: quote.estimatedProbabilityBps,
             entryPrice: quote.spotPrice,
             exitPrice: 0,
             createdAt: block.timestamp,
@@ -404,9 +407,14 @@ contract PolicyFactory is AccessControl, Pausable {
             rawPayout = (policy.notional * (exitPrice - policy.strikePrice)) / policy.entryPrice;
         }
 
-        if (rawPayout <= policy.deductible) return 0;
+        uint256 surpriseBps = BPS > policy.estimatedProbabilityBps ? BPS - policy.estimatedProbabilityBps : 0;
+        uint256 premiumFloorBps = BPS + 1_200 + (surpriseBps / 20);
+        uint256 premiumFloor = (policy.premiumPaid * premiumFloorBps) / BPS;
+        uint256 capFloor = (policy.payoutCap * MIN_TRIGGERED_PAYOUT_BPS) / BPS;
+        uint256 minTriggeredPayout = premiumFloor > capFloor ? premiumFloor : capFloor;
 
-        payout = rawPayout - policy.deductible;
+        uint256 linearPayout = rawPayout > policy.deductible ? rawPayout - policy.deductible : 0;
+        payout = minTriggeredPayout + linearPayout;
         if (payout > policy.payoutCap) payout = policy.payoutCap;
     }
 

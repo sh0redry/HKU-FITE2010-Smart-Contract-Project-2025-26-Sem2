@@ -71,7 +71,8 @@ async function fetchAlphaVantageCandles(symbol, deployment) {
   const query = new URLSearchParams({
     provider: "alpha-vantage",
     symbol: alphaSymbol,
-    range: "1week"
+    range: "1week",
+    ts: String(Date.now())
   });
 
   const response = await fetch(`${proxyPathFor(runtimeConfig)}?${query.toString()}`);
@@ -102,7 +103,8 @@ async function fetchYfinanceCandles(symbol, deployment) {
       const query = new URLSearchParams({
         provider: "yfinance",
         symbol: yfinanceSymbol,
-        range: "1week"
+        range: "1week",
+        ts: String(Date.now())
       });
       const response = await fetch(`${proxyPathFor(runtimeConfig)}?${query.toString()}`);
       if (!response.ok) {
