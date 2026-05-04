@@ -3,11 +3,15 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import "../interfaces/IInsuranceVault.sol";
 import "../interfaces/IPricingEngine.sol";
 
-contract PolicyFactory is AccessControl, Pausable {
+/// @title PolicyFactory
+/// @notice Creates, tracks, cancels, and settles stock hedge insurance policies.
+/// @dev Pricing is delegated to IPricingEngine and settlement capital is held by IInsuranceVault.
+contract PolicyFactory is AccessControl, Pausable, ReentrancyGuard {
     uint256 public constant BPS = 10_000;
     uint256 public constant MIN_CANCEL_DELAY = 30 minutes;
     uint256 public constant MIN_TRIGGERED_PAYOUT_BPS = 2_500;
@@ -116,6 +120,7 @@ contract PolicyFactory is AccessControl, Pausable {
     error PolicyExpired();
     error CancellationLocked();
     error NotPolicyHolder();
+    error InvalidPolicyId(uint256 policyId);
     error UnderwritingPaused(bytes32 reason);
     error SymbolExposureLimitExceeded(bytes32 symbol);
     error DirectionExposureLimitExceeded(bool isDownsideProtection);
@@ -201,6 +206,16 @@ contract PolicyFactory is AccessControl, Pausable {
         emit SymbolExposureLimitUpdated(symbol, newLimit);
     }
 
+    /// @notice Buys an upside or downside stock insurance policy.
+    /// @dev The vault collects the premium and locks the quoted payout cap before policy state is stored.
+    /// @param symbol Whitelisted stock symbol encoded as bytes32.
+    /// @param isDownsideProtection True for downside protection, false for upside protection.
+    /// @param notional Policy notional in settlement token units.
+    /// @param duration Policy duration in seconds.
+    /// @param triggerBps Trigger distance from entry price, in basis points.
+    /// @param deductible Deductible amount subtracted from linear payout.
+    /// @param payoutCap Maximum claim reserved and payable.
+    /// @return policyId Newly created policy identifier.
     function purchasePolicy(
         bytes32 symbol,
         bool isDownsideProtection,
@@ -209,7 +224,7 @@ contract PolicyFactory is AccessControl, Pausable {
         uint16 triggerBps,
         uint256 deductible,
         uint256 payoutCap
-    ) external whenNotPaused returns (uint256 policyId) {
+    ) external whenNotPaused nonReentrant returns (uint256 policyId) {
         if (notional == 0 || payoutCap == 0) revert InvalidAmount();
         if (underwritingPaused) revert UnderwritingPaused(bytes32("MANUAL_PAUSE"));
         if (!pricingEngine.isSupportedSymbol(symbol)) revert UnsupportedSymbol(symbol);
@@ -273,22 +288,33 @@ contract PolicyFactory is AccessControl, Pausable {
         );
     }
 
-    function settlePolicy(uint256 policyId) external {
+    /// @notice Settles one expired policy using the pricing engine settlement price.
+    /// @param policyId Policy identifier to settle.
+    function settlePolicy(uint256 policyId) external nonReentrant {
         _settlePolicy(policyId);
     }
 
-    function settlePolicies(uint256[] calldata policyIds) external {
+    /// @notice Batch-settles any settleable policies from a provided list.
+    /// @dev Invalid, active, already settled, or oracle-pending policies are skipped so keeper batches do not fail as a whole.
+    /// @param policyIds Candidate policy identifiers to settle.
+    function settlePolicies(uint256[] calldata policyIds) external nonReentrant {
         uint256 length = policyIds.length;
         for (uint256 i = 0; i < length;) {
-            _settlePolicy(policyIds[i]);
+            if (isPolicySettleable(policyIds[i])) {
+                _settlePolicy(policyIds[i]);
+            }
             unchecked {
                 ++i;
             }
         }
     }
 
-    function cancelPolicy(uint256 policyId) external {
+    /// @notice Cancels an active policy after the cancellation lock delay.
+    /// @dev Premium is not refunded; only reserved liquidity is released back to the vault.
+    /// @param policyId Policy identifier to cancel.
+    function cancelPolicy(uint256 policyId) external nonReentrant {
         Policy storage policy = policies[policyId];
+        if (policy.holder == address(0)) revert InvalidPolicyId(policyId);
         if (policy.status != PolicyStatus.Active) revert PolicyNotActive();
         if (msg.sender != policy.holder) revert NotPolicyHolder();
         if (block.timestamp >= policy.expiry) revert PolicyExpired();
@@ -308,7 +334,9 @@ contract PolicyFactory is AccessControl, Pausable {
     }
 
     function getPolicy(uint256 policyId) external view returns (Policy memory) {
-        return policies[policyId];
+        Policy memory policy = policies[policyId];
+        if (policy.holder == address(0)) revert InvalidPolicyId(policyId);
+        return policy;
     }
 
     function getActivePoliciesCount() external view returns (uint256) {
@@ -335,6 +363,9 @@ contract PolicyFactory is AccessControl, Pausable {
 
     function isPolicySettleable(uint256 policyId) public view returns (bool) {
         Policy storage policy = policies[policyId];
+        if (policy.holder == address(0)) {
+            return false;
+        }
         if (policy.status != PolicyStatus.Active || block.timestamp < policy.expiry) {
             return false;
         }
@@ -370,6 +401,7 @@ contract PolicyFactory is AccessControl, Pausable {
 
     function _settlePolicy(uint256 policyId) internal {
         Policy storage policy = policies[policyId];
+        if (policy.holder == address(0)) revert InvalidPolicyId(policyId);
         if (policy.status != PolicyStatus.Active) revert PolicyNotActive();
         if (block.timestamp < policy.expiry) revert PolicyNotExpired();
 

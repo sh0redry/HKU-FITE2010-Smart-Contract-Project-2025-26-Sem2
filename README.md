@@ -1,10 +1,24 @@
 # Stock Hedge Insurance
 
+## One-Minute Summary
+
+`Stock Hedge Insurance` is a Solidity smart contract project for stock price insurance. A user can buy either downside protection or upside protection for a selected U.S. or Hong Kong stock. The buyer pays a premium in `MockUSDC`, and the protocol's LP vault locks enough reserve capital to cover the maximum possible claim. Stock prices are read through an oracle adapter, while the pricing engine calculates premiums from spot price, volatility inputs, direction, trigger distance, duration, and vault utilization. When a policy expires, the contract compares the entry price and settlement price, then automatically releases reserves or pays the buyer if the insured price move happened.
+
+In short:
+
+- Buyers purchase stock upside/downside insurance.
+- LPs deposit USDC-like liquidity and act as underwriters.
+- Oracle feeds provide stock prices for quoting and settlement.
+- The pricing engine calculates risk-based premiums.
+- The vault locks reserves and pays claims.
+- Automation-compatible settlement can batch-settle expired policies.
+
 Quick links:
 
 - [Chinese Presentation Flow](docs/PRESENTATION_FLOW_CN.md)
-
-`Stock Hedge Insurance` is a Solidity-based stock insurance and LP underwriting system. Buyers pay a premium to insure against a defined stock move over a chosen duration, while liquidity providers supply the settlement capital and earn underwriting income unless a payout is triggered.
+- [Stable Chinese Demo Route](docs/DEMO_ROUTE_CN.md)
+- [Security Overview](SECURITY.md)
+- [Security Checklist](docs/SECURITY_CHECKLIST.md)
 
 The project is built as a modular on-chain derivatives MVP with:
 
@@ -16,6 +30,17 @@ The project is built as a modular on-chain derivatives MVP with:
 - role-based governance and pause controls
 - buyer, admin, and simulator frontends
 - local/demo/testnet deployment workflows
+
+## Course Grading Mapping
+
+This repository is structured around the course judging criteria:
+
+| Criterion | How This Project Addresses It | Main Files / Features |
+|---|---|---|
+| Innovation & Originality | Implements an on-chain stock insurance and LP underwriting system instead of a common lottery/crowdfunding example. It supports upside/downside policies, U.S./Hong Kong market sessions, risk-based pricing, LP reserve accounting, and demo stock scenarios. | `PolicyFactory.sol`, `InsuranceVault.sol`, `PricingOracle.sol`, `frontend/simulation.html`, `frontend/scenarios.js` |
+| Smart Contract Functionality | Supports policy purchase, premium quotation, reserve locking, cancellation, expiry settlement, claim payout, LP deposits/withdrawals, multi-symbol markets, oracle fallback, role governance, and automation-compatible batch settlement. | `contracts/core/PolicyFactory.sol`, `contracts/core/InsuranceVault.sol`, `contracts/engines/PricingOracle.sol`, `contracts/automation/PolicySettlementAutomation.sol` |
+| Code Quality & Security | Uses modular contracts, custom errors, OpenZeppelin `AccessControl`, `Ownable`, `Pausable`, `ReentrancyGuard`, and `SafeERC20`. It includes solvency checks, utilization limits, symbol exposure caps, direction caps, term-bucket caps, oracle staleness checks, and emergency pause controls. | `PolicyFactory.sol`, `InsuranceVault.sol`, `ChainlinkOracleAdapter.sol`, `SECURITY.md`, `docs/SECURITY_CHECKLIST.md` |
+| Interaction & Usability | Can be compiled, deployed, and tested through Hardhat. Includes local deployment scripts, full automated tests, a Remix-style demo deployer, and optional buyer/admin/simulator pages for classroom presentation. | `package.json`, `scripts/deploy-local.js`, `test/`, `contracts/mocks/StockHedgeDemoDeployer.sol`, `frontend/index.html`, `frontend/admin.html`, `frontend/simulation.html` |
 
 ## What The System Does
 

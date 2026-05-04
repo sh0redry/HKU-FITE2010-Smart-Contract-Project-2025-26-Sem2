@@ -1282,4 +1282,52 @@ describe("Phase 8 Governance And Multi-Market Lifecycle", function () {
     expect(await insuranceVault.netUnderwritingResult()).to.equal(quote.premium);
     expect(await insuranceVault.sharePrice()).to.be.gt(initialSharePrice);
   });
+
+  it("reverts with a clear error for unknown policy ids", async function () {
+    const { policyFactory } = await loadFixture(deployFixture);
+
+    await expect(policyFactory.getPolicy(999))
+      .to.be.revertedWithCustomError(policyFactory, "InvalidPolicyId")
+      .withArgs(999);
+
+    await expect(policyFactory.settlePolicy(999))
+      .to.be.revertedWithCustomError(policyFactory, "InvalidPolicyId")
+      .withArgs(999);
+  });
+
+  it("batch settlement skips invalid and not-yet-settleable policy ids", async function () {
+    const { lp, buyer, mockUsdc, spotFeed, insuranceVault, policyFactory } = await loadFixture(deployFixture);
+
+    await approveAndDeposit(mockUsdc, insuranceVault, lp, ethers.parseUnits("10000", USDC_DECIMALS));
+
+    const quote = await policyFactory.previewPolicy(
+      AAPL,
+      true,
+      ethers.parseUnits("1000", USDC_DECIMALS),
+      24 * 3600,
+      1000,
+      0,
+      ethers.parseUnits("500", USDC_DECIMALS)
+    );
+    await mockUsdc.connect(buyer).approve(await insuranceVault.getAddress(), quote.premium);
+    await policyFactory.connect(buyer).purchasePolicy(
+      AAPL,
+      true,
+      ethers.parseUnits("1000", USDC_DECIMALS),
+      24 * 3600,
+      1000,
+      0,
+      ethers.parseUnits("500", USDC_DECIMALS)
+    );
+
+    await policyFactory.settlePolicies([999, 1]);
+    expect((await policyFactory.getPolicy(1)).status).to.equal(0);
+
+    const purchasedPolicy = await policyFactory.getPolicy(1);
+    await spotFeed.setAnswer(200n * 10n ** 8n);
+    await time.increaseTo(Number(purchasedPolicy.expiry) + 1);
+    await policyFactory.settlePolicies([999, 1]);
+
+    expect((await policyFactory.getPolicy(1)).status).to.equal(1);
+  });
 });

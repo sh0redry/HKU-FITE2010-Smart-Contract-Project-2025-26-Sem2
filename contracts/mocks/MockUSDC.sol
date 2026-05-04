@@ -2,21 +2,18 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-
-import "../interfaces/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract MockUSDC is IERC20, Ownable {
     string public constant name = "Mock USD Coin";
     string public constant symbol = "mUSDC";
-    uint8 public constant override decimals = 6;
+    uint8 public constant decimals = 6;
 
     uint256 public override totalSupply;
 
     mapping(address => uint256) public override balanceOf;
     mapping(address => mapping(address => uint256)) public override allowance;
 
-    event Transfer(address indexed from, address indexed to, uint256 value);
-    event Approval(address indexed owner, address indexed spender, uint256 value);
     error InvalidAddress();
     error InsufficientBalance();
     error InsufficientAllowance();

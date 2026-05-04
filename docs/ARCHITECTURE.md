@@ -72,12 +72,12 @@ flowchart TD
 - utilization ceiling
 - minimum liquidity buffer
 - market-hours purchase gating
+- Hong Kong midday lunch-break closure handling
 - close-buffer anti-gap opening guard
 - fallback oracle allowlist per market
 
 ## Current Limitations
 
-- Hong Kong lunch break is not yet represented.
 - Real production feeds are abstracted but not fully wired to live vendor credentials in-repo.
 - Settlement still uses current oracle spot when the allowed settlement window is reached.
 - This remains a course-project-grade derivatives MVP, not audited production infrastructure.
@@ -85,7 +85,6 @@ flowchart TD
 ## Future Extensions
 
 - full exchange holiday calendars
-- Hong Kong midday recess support
 - live Chainlink Functions or backend-driven risk snapshots
 - indexer-backed portfolio pages
 - multi-pool underwriting or segregated risk tranches

@@ -2,15 +2,21 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-
-import "../interfaces/IERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {IERC20 as OZIERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "../interfaces/IInsuranceVault.sol";
 
-contract InsuranceVault is IInsuranceVault, Ownable {
+/// @title InsuranceVault
+/// @notice ERC20 settlement vault for LP deposits, reserved claim capital, premium income, and claim payments.
+/// @dev Only the configured policy manager can reserve/release capital, collect premiums, and pay claims.
+contract InsuranceVault is IInsuranceVault, Ownable, ReentrancyGuard {
+    using SafeERC20 for OZIERC20;
+
     uint256 public constant BPS = 10_000;
     uint256 public constant SHARE_PRICE_SCALE = 1e18;
 
-    IERC20 public immutable assetToken;
+    OZIERC20 public immutable assetToken;
 
     address public policyManager;
 
@@ -25,8 +31,6 @@ contract InsuranceVault is IInsuranceVault, Ownable {
 
     mapping(address => uint256) public shareBalance;
 
-    uint256 private _lock;
-
     event PolicyManagerUpdated(address indexed previousManager, address indexed newManager);
     event Deposited(address indexed provider, uint256 assets, uint256 sharesMinted);
     event Withdrawn(address indexed provider, uint256 assets, uint256 sharesBurned);
@@ -39,7 +43,6 @@ contract InsuranceVault is IInsuranceVault, Ownable {
     error InvalidAddress();
     error InvalidAmount();
     error InsufficientLiquidity();
-    error Reentrancy();
     error TokenTransferFailed();
 
     modifier onlyPolicyManager() {
@@ -47,25 +50,23 @@ contract InsuranceVault is IInsuranceVault, Ownable {
         _;
     }
 
-    modifier nonReentrant() {
-        if (_lock == 1) revert Reentrancy();
-        _lock = 1;
-        _;
-        _lock = 0;
-    }
-
     constructor(address initialOwner, address assetTokenAddress) Ownable(initialOwner) {
         if (initialOwner == address(0) || assetTokenAddress == address(0)) revert InvalidAddress();
-        assetToken = IERC20(assetTokenAddress);
+        assetToken = OZIERC20(assetTokenAddress);
         settlementAsset = assetTokenAddress;
     }
 
+    /// @notice Sets the only contract allowed to manage policy reserves and claims.
+    /// @dev This should be the deployed PolicyFactory address.
     function setPolicyManager(address newPolicyManager) external onlyOwner {
         if (newPolicyManager == address(0)) revert InvalidAddress();
         emit PolicyManagerUpdated(policyManager, newPolicyManager);
         policyManager = newPolicyManager;
     }
 
+    /// @notice Deposits settlement assets and mints proportional LP shares.
+    /// @param assetAmount Amount of settlement ERC20 tokens to deposit.
+    /// @return sharesMinted Number of vault shares minted to the LP.
     function deposit(uint256 assetAmount) external override nonReentrant returns (uint256 sharesMinted) {
         if (assetAmount == 0) revert InvalidAmount();
 
@@ -77,9 +78,7 @@ contract InsuranceVault is IInsuranceVault, Ownable {
         }
         if (sharesMinted == 0) revert InvalidAmount();
 
-        if (!assetToken.transferFrom(msg.sender, address(this), assetAmount)) {
-            revert TokenTransferFailed();
-        }
+        assetToken.safeTransferFrom(msg.sender, address(this), assetAmount);
 
         totalAssets = currentAssets + assetAmount;
         totalShares += sharesMinted;
@@ -89,6 +88,10 @@ contract InsuranceVault is IInsuranceVault, Ownable {
         emit Deposited(msg.sender, assetAmount, sharesMinted);
     }
 
+    /// @notice Burns LP shares and withdraws the corresponding unlocked assets.
+    /// @dev Withdrawals cannot use assets that are reserved for active policy maximum payouts.
+    /// @param shareAmount Vault shares to burn.
+    /// @return assetsOut Settlement tokens returned to the LP.
     function withdraw(uint256 shareAmount) external override nonReentrant returns (uint256 assetsOut) {
         if (shareAmount == 0) revert InvalidAmount();
         if (shareAmount > shareBalance[msg.sender]) revert InsufficientLiquidity();
@@ -101,7 +104,7 @@ contract InsuranceVault is IInsuranceVault, Ownable {
         totalAssets -= assetsOut;
         cumulativeWithdrawals += assetsOut;
 
-        if (!assetToken.transfer(msg.sender, assetsOut)) revert TokenTransferFailed();
+        assetToken.safeTransfer(msg.sender, assetsOut);
 
         emit Withdrawn(msg.sender, assetsOut, shareAmount);
     }
@@ -128,6 +131,8 @@ contract InsuranceVault is IInsuranceVault, Ownable {
         return int256(realizedPremiums) - int256(totalClaimsPaid);
     }
 
+    /// @notice Locks available liquidity as maximum claim reserve for a new policy.
+    /// @param amount Amount of settlement asset reserved.
     function reserveLiquidity(uint256 amount) external override onlyPolicyManager {
         if (amount == 0) revert InvalidAmount();
         if (amount > availableLiquidity()) revert InsufficientLiquidity();
@@ -136,6 +141,8 @@ contract InsuranceVault is IInsuranceVault, Ownable {
         emit LiquidityReserved(amount, totalReserved);
     }
 
+    /// @notice Releases unused reserved liquidity after cancellation or settlement.
+    /// @param amount Amount of settlement asset to unlock.
     function releaseLiquidity(uint256 amount) external override onlyPolicyManager {
         if (amount == 0) revert InvalidAmount();
         if (amount > totalReserved) revert InsufficientLiquidity();
@@ -144,17 +151,23 @@ contract InsuranceVault is IInsuranceVault, Ownable {
         emit LiquidityReleased(amount, totalReserved);
     }
 
+    /// @notice Pulls a buyer premium into the vault and records realized underwriting income.
+    /// @param payer Buyer paying the premium.
+    /// @param amount Premium amount in settlement asset units.
     function collectPremium(address payer, uint256 amount) external override onlyPolicyManager {
         if (payer == address(0)) revert InvalidAddress();
         if (amount == 0) revert InvalidAmount();
 
-        if (!assetToken.transferFrom(payer, address(this), amount)) revert TokenTransferFailed();
+        assetToken.safeTransferFrom(payer, address(this), amount);
 
         totalAssets += amount;
         realizedPremiums += amount;
         emit PremiumCollected(payer, amount, realizedPremiums);
     }
 
+    /// @notice Pays a triggered policy claim to the beneficiary from reserved capital.
+    /// @param beneficiary Policy holder receiving the claim.
+    /// @param amount Claim amount in settlement asset units.
     function payClaim(address beneficiary, uint256 amount)
         external
         override
@@ -169,7 +182,7 @@ contract InsuranceVault is IInsuranceVault, Ownable {
         totalAssets -= amount;
         totalClaimsPaid += amount;
 
-        if (!assetToken.transfer(beneficiary, amount)) revert TokenTransferFailed();
+        assetToken.safeTransfer(beneficiary, amount);
 
         emit ClaimPaid(beneficiary, amount, totalReserved, totalClaimsPaid);
     }

@@ -8,6 +8,9 @@ import "../interfaces/IPricingEngine.sol";
 import "../interfaces/IOracleAdapter.sol";
 import "../interfaces/IRiskParameterProvider.sol";
 
+/// @title PricingOracle
+/// @notice Lightweight on-chain pricing and market-session engine for stock insurance policies.
+/// @dev Complex risk inputs are supplied by an external risk parameter provider; this contract combines them with spot, utilization, direction, and term data.
 contract PricingOracle is IPricingEngine, AccessControl, Pausable {
     uint256 public constant BPS = 10_000;
     uint256 public constant YEAR = 365 days;
@@ -139,6 +142,9 @@ contract PricingOracle is IPricingEngine, AccessControl, Pausable {
         oracleAdapter = newAdapter;
     }
 
+    /// @notice Adds or updates a market's quote constraints, session window, and settlement behavior.
+    /// @param symbol Stock symbol encoded as bytes32.
+    /// @param config Market configuration used by the quote and settlement path.
     function configureMarket(bytes32 symbol, MarketConfigInput calldata config) external onlyRole(RISK_MANAGER_ROLE) {
         if (config.minDuration == 0 || config.maxDuration < config.minDuration) revert InvalidDuration();
         if (config.openMinutesLocal >= DAY / 1 minutes || config.closeMinutesLocal >= DAY / 1 minutes) {
@@ -179,6 +185,17 @@ contract PricingOracle is IPricingEngine, AccessControl, Pausable {
         emit CalendarClosureUpdated(uint8(calendarType), dateKey, isClosed);
     }
 
+    /// @notice Returns a deterministic on-chain premium quote for a requested policy.
+    /// @dev Reverts when the symbol is inactive, market is closed, oracle data is invalid, or policy terms exceed risk limits.
+    /// @param symbol Stock symbol encoded as bytes32.
+    /// @param notional Policy notional in settlement token units.
+    /// @param duration Policy duration in seconds.
+    /// @param triggerBps Trigger distance from the entry spot, in basis points.
+    /// @param deductible Deductible amount subtracted from linear payout.
+    /// @param payoutCap Maximum payable claim amount.
+    /// @param utilizationBpsValue Current vault utilization, supplied by PolicyFactory.
+    /// @param isDownsideProtection True for downside protection, false for upside protection.
+    /// @return quote Full quote and risk breakdown used by frontend and policy creation.
     function quotePremium(
         bytes32 symbol,
         uint256 notional,
@@ -287,6 +304,12 @@ contract PricingOracle is IPricingEngine, AccessControl, Pausable {
         return _readSpotOracle(symbol, config.allowFallbackOracle).price;
     }
 
+    /// @notice Reads the settlement price for an expired policy.
+    /// @dev If settlement mode is next-open, the function reverts until the effective settlement timestamp has arrived.
+    /// @param symbol Stock symbol encoded as bytes32.
+    /// @param scheduledExpiry Original policy expiry timestamp.
+    /// @return price Normalized 18-decimal settlement price.
+    /// @return effectiveTimestamp Timestamp at which settlement is allowed.
     function getSettlementPrice(bytes32 symbol, uint256 scheduledExpiry)
         external
         view

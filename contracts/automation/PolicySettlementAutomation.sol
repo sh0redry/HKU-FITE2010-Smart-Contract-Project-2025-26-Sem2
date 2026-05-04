@@ -4,6 +4,9 @@ pragma solidity ^0.8.20;
 import "../core/PolicyFactory.sol";
 import "../interfaces/IAutomationCompatible.sol";
 
+/// @title PolicySettlementAutomation
+/// @notice Chainlink Automation-compatible helper that scans active policy IDs and settles ready expiries.
+/// @dev The underlying PolicyFactory batch settlement skips non-settleable IDs to keep keeper execution robust.
 contract PolicySettlementAutomation is IAutomationCompatible {
     PolicyFactory public immutable policyFactory;
     uint256 public immutable defaultBatchSize;
@@ -16,6 +19,10 @@ contract PolicySettlementAutomation is IAutomationCompatible {
         defaultBatchSize = batchSize;
     }
 
+    /// @notice Finds settleable policies in a cursor-based active-policy batch.
+    /// @param checkData Optional abi-encoded `(cursor, batchSize)` pair.
+    /// @return upkeepNeeded True when at least one policy can be settled.
+    /// @return performData ABI-encoded policy IDs for `performUpkeep`.
     function checkUpkeep(bytes calldata checkData) external view override returns (bool upkeepNeeded, bytes memory performData) {
         (uint256 cursor, uint256 batchSize) = checkData.length == 0
             ? (uint256(0), defaultBatchSize)
@@ -52,6 +59,8 @@ contract PolicySettlementAutomation is IAutomationCompatible {
         performData = abi.encode(result);
     }
 
+    /// @notice Settles the policy IDs returned by `checkUpkeep`.
+    /// @param performData ABI-encoded array of candidate policy IDs.
     function performUpkeep(bytes calldata performData) external override {
         uint256[] memory policyIds = abi.decode(performData, (uint256[]));
         if (policyIds.length == 0) {

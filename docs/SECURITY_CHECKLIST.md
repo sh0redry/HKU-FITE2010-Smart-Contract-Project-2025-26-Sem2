@@ -2,8 +2,8 @@
 
 ## Reentrancy
 
-- `InsuranceVault.deposit` and `InsuranceVault.withdraw` are guarded by `nonReentrant`.
-- `InsuranceVault.payClaim` is also guarded by `nonReentrant`.
+- `InsuranceVault.deposit`, `InsuranceVault.withdraw`, and `InsuranceVault.payClaim` use OpenZeppelin `ReentrancyGuard`.
+- `PolicyFactory.purchasePolicy`, `PolicyFactory.settlePolicy`, `PolicyFactory.settlePolicies`, and `PolicyFactory.cancelPolicy` use OpenZeppelin `ReentrancyGuard`.
 - `PolicyFactory` does not transfer ERC20 assets directly; it routes asset movement through `InsuranceVault`.
 - Review item:
   Confirm future ERC20 upgrades do not introduce callback behavior that bypasses the current assumptions.
@@ -40,8 +40,10 @@
 - New policy opening is blocked when the market is closed if `enforceMarketHours` is enabled.
 - Close-buffer logic blocks opening too close to session end.
 - `SettlementPricePending` blocks settlement before the allowed settlement window.
+- U.S. market sessions include daylight-saving handling.
+- Hong Kong market sessions model the lunch break as closed and reopen at 13:00 HKT.
 - Review item:
-  Hong Kong lunch break is not yet modeled. Current implementation uses a simplified continuous local session.
+  Keep holiday closure lists updated for the target demo/testnet period.
 
 ## Solvency And Accounting
 
@@ -59,6 +61,13 @@
   - `totalClaimsPaid`
 - Review item:
   Confirm that future fee-routing logic preserves the invariant `availableLiquidity = totalAssets - totalReserved`.
+
+## Invalid State Handling
+
+- Unknown policy IDs revert with `InvalidPolicyId(policyId)` on direct reads and direct settlement attempts.
+- Automation-oriented batch settlement skips invalid, already settled, active, or oracle-pending policy IDs so one bad candidate does not fail the whole batch.
+- Review item:
+  If batch settlement starts charging fees, make sure skipped IDs cannot be used to grief keepers.
 
 ## Precision And Decimal Handling
 
